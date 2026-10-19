@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import pulp
 import streamlit as st
@@ -91,6 +93,19 @@ def solve_supply(frame, demand):
     return plan, available
 
 
+def distance_km(lat1, lon1, lat2, lon2):
+    """Distance geodesique a vol d'oiseau entre deux coordonnees."""
+    earth_radius_km = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    haversine = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * earth_radius_km * math.asin(math.sqrt(haversine))
+
+
 try:
     data, demo = (pd.read_csv(upload), False) if upload else (pd.read_csv("data/demo_gisements.csv"), True)
 except Exception as exc:
@@ -108,7 +123,7 @@ if demo:
 else:
     st.success("Fichier importé. Les résultats dépendent de l’exactitude des données fournies.")
 
-home, map_tab, compare, optimize, quality_tab = st.tabs(["Tableau de bord", "Carte", "Comparer les régions", "Plan d’approvisionnement", "Qualité des données"])
+home, map_tab, site_tab, compare, optimize, quality_tab = st.tabs(["Tableau de bord", "Carte", "Proximité d’un site", "Comparer les régions", "Plan d’approvisionnement", "Qualité des données"])
 with home:
     st.subheader("Vue d’ensemble")
     a, b, c, d = st.columns(4)
@@ -147,6 +162,56 @@ with map_tab:
             st.caption("La taille des points représente le volume mobilisable simulé. Le niveau de précision dépend des coordonnées fournies.")
             map_columns = ["id_gisement", "biomasse", "region", "latitude", "longitude", "volume_scenario_t_an", "statut_donnee"]
             st.dataframe(mapped[map_columns], use_container_width=True, hide_index=True)
+
+with site_tab:
+    st.subheader("Proximité d’un site candidat")
+    st.write("Saisis les coordonnées d’un site d’usine candidat pour examiner sa proximité avec les gisements localisés.")
+    st.warning("Les distances calculées sont à vol d’oiseau. Elles ne représentent ni les trajets routiers ni un coût de transport.")
+    site_name = st.text_input("Nom du site candidat", placeholder="Ex. Site A")
+    site_col1, site_col2 = st.columns(2)
+    with site_col1:
+        site_lat_text = st.text_input("Latitude du site", placeholder="Ex. 31.93")
+    with site_col2:
+        site_lon_text = st.text_input("Longitude du site", placeholder="Ex. -4.42")
+    if not all(name in data.columns for name in COORDINATES):
+        st.info("Le fichier chargé ne contient pas de coordonnées de gisements.")
+    elif not site_lat_text.strip() or not site_lon_text.strip():
+        st.info("Entre la latitude et la longitude du site pour afficher les distances.")
+    else:
+        try:
+            site_lat, site_lon = float(site_lat_text), float(site_lon_text)
+            if not (-90 <= site_lat <= 90 and -180 <= site_lon <= 180):
+                raise ValueError("Coordonnées hors limites.")
+        except ValueError:
+            st.error("Entre des coordonnées numériques valides : latitude de -90 à 90 et longitude de -180 à 180.")
+        else:
+            located = data[data["latitude"].notna() & data["longitude"].notna()].copy()
+            if located.empty:
+                st.info("Aucun gisement n’a de coordonnées complètes.")
+            else:
+                located["distance_a_vol_doiseau_km"] = located.apply(
+                    lambda row: distance_km(site_lat, site_lon, row["latitude"], row["longitude"]),
+                    axis=1,
+                )
+                located = located.sort_values("distance_a_vol_doiseau_km")
+                if site_name.strip():
+                    st.caption(f"Distances depuis : {site_name.strip()}")
+                nearest = located.iloc[0]
+                k1, k2 = st.columns(2)
+                k1.metric("Gisement le plus proche", str(nearest["id_gisement"]))
+                k2.metric("Distance à vol d’oiseau", f"{nearest['distance_a_vol_doiseau_km']:.1f} km")
+                radius_text = st.text_input("Rayon de comparaison facultatif (km)", placeholder="Laisse vide pour ne pas filtrer")
+                if radius_text.strip():
+                    try:
+                        radius = float(radius_text)
+                        if radius <= 0:
+                            raise ValueError("Le rayon doit être positif.")
+                        in_radius = located[located["distance_a_vol_doiseau_km"] <= radius]
+                        st.metric(f"Volume mobilisable dans {radius:g} km à vol d’oiseau", f"{in_radius['volume_scenario_t_an'].sum():,.0f} t/an")
+                    except ValueError:
+                        st.error("Saisis un rayon positif en kilomètres.")
+                distance_columns = ["id_gisement", "biomasse", "region", "distance_a_vol_doiseau_km", "volume_scenario_t_an", "cout_scenario_dh_t"]
+                st.dataframe(located[distance_columns], use_container_width=True, hide_index=True)
 
 with compare:
     st.subheader("Comparer les régions")

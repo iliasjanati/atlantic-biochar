@@ -116,3 +116,7 @@ La comparaison régionale permet également de choisir un besoin annuel commun e
 ## Carte interactive
 
 L’onglet **Carte** affiche les gisements qui possèdent une latitude et une longitude valides. Les points de démonstration portent des coordonnées indicatives fictives et ne représentent pas les emplacements réels des gisements. Pour des données d’entreprise, saisir les coordonnées réellement fournies. Le modèle CSV téléchargeable inclut maintenant les colonnes `latitude` et `longitude`.
+
+## Proximité d’un site candidat
+
+L’onglet **Proximité d’un site** accepte les coordonnées d’un emplacement candidat, calcule la distance à vol d’oiseau vers chaque gisement localisé, puis affiche les gisements du plus proche au plus éloigné. Un rayon facultatif permet de sommer le volume mobilisable simulé à l’intérieur de cette distance directe. Ce calcul sert au pré-diagnostic spatial uniquement : il ne calcule ni trajet routier ni coût de transport.
