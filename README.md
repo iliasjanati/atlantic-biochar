@@ -120,3 +120,9 @@ L’onglet **Carte** affiche les gisements qui possèdent une latitude et une lo
 ## Proximité d’un site candidat
 
 L’onglet **Proximité d’un site** accepte les coordonnées d’un emplacement candidat, calcule la distance à vol d’oiseau vers chaque gisement localisé, puis affiche les gisements du plus proche au plus éloigné. Un rayon facultatif permet de sommer le volume mobilisable simulé à l’intérieur de cette distance directe. Ce calcul sert au pré-diagnostic spatial uniquement : il ne calcule ni trajet routier ni coût de transport.
+
+## Formats de données acceptés
+
+L’import accepte les fichiers `.csv` et `.xlsx`. Pour Excel, le premier onglet est lu. Pour les CSV, le séparateur virgule ou point-virgule est détecté automatiquement ; les virgules décimales sont prises en charge dans les CSV séparés par des points-virgules. Les colonnes doivent conserver les noms du modèle téléchargeable.
+
+L’onglet **Qualité des données** signale aussi les sources, années, niveaux de fiabilité, quantités et coordonnées à compléter. Il permet de télécharger un rapport par gisement pour faciliter les corrections avant l’analyse.

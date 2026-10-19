@@ -14,7 +14,8 @@ st.title("🌱 Atlantic Biochar")
 st.caption("Système d’aide à la décision pour l’approvisionnement en biomasse")
 with st.sidebar:
     st.header("Données")
-    upload = st.file_uploader("Importer les données (CSV)", type=["csv"])
+    upload = st.file_uploader("Importer les données (CSV ou Excel)", type=["csv", "xlsx"])
+    st.caption("Les CSV à séparateur virgule ou point-virgule et les classeurs Excel sont acceptés.")
     st.caption("Sans import, le prototype utilise son jeu fictif de démonstration.")
     st.divider()
     st.header("Hypothèses de scénario")
@@ -24,7 +25,17 @@ with st.sidebar:
 
 
 def load_frame(file):
-    return (pd.read_csv(file), False) if file else (pd.read_csv("data/demo_gisements.csv"), True)
+    if file is None:
+        return pd.read_csv("data/demo_gisements.csv"), True
+
+    if file.name.lower().endswith(".xlsx"):
+        return pd.read_excel(file, sheet_name=0), False
+
+    sample = file.getvalue()[:8192].decode("utf-8-sig", errors="replace")
+    separator = ";" if sample.count(";") > sample.count(",") else ","
+    file.seek(0)
+    decimal = "," if separator == ";" else "."
+    return pd.read_csv(file, sep=separator, decimal=decimal, encoding="utf-8-sig"), False
 
 
 def validate(frame):
@@ -50,8 +61,12 @@ def validate(frame):
     invalid = complete & ((frame[QUANTITIES[1]] > frame[QUANTITIES[0]]) | (frame[QUANTITIES[2]] > frame[QUANTITIES[1]]))
     if invalid.any():
         errors.append(f"{int(invalid.sum())} ligne(s) incohérentes : mobilisable ≤ récupérable ≤ théorique attendu.")
-    if frame["id_gisement"].isna().any() or frame["id_gisement"].duplicated().any():
-        errors.append("Les identifiants doivent être renseignés et uniques.")
+    for name in ["id_gisement", "biomasse", "region"]:
+        missing_text = frame[name].isna() | frame[name].astype(str).str.strip().eq("")
+        if missing_text.any():
+            errors.append(f"{name} doit être renseigné pour chaque gisement.")
+    if frame["id_gisement"].duplicated().any():
+        errors.append("Les identifiants de gisement doivent être uniques.")
     if "latitude" in frame.columns and ((frame["latitude"].dropna().abs() > 90).any()):
         errors.append("Les latitudes doivent être comprises entre -90 et 90.")
     if "longitude" in frame.columns and ((frame["longitude"].dropna().abs() > 180).any()):
@@ -107,7 +122,7 @@ def distance_km(lat1, lon1, lat2, lon2):
 
 
 try:
-    data, demo = (pd.read_csv(upload), False) if upload else (pd.read_csv("data/demo_gisements.csv"), True)
+    data, demo = load_frame(upload)
 except Exception as exc:
     st.error(f"Lecture du fichier impossible : {exc}")
     st.stop()
@@ -289,13 +304,48 @@ with optimize:
 
 with quality_tab:
     st.subheader("Qualité et traçabilité")
-    source_missing = int(data["source"].isna().sum()) if "source" in data.columns else len(data)
-    quality = pd.DataFrame({
-        "Indicateur": ["Quantité mobilisable manquante", "Coût incomplet", "Source absente", "Données fictives"],
-        "Lignes": [int(data["quantite_mobilisable_t_an"].isna().sum()), int((~data["cout_complet"]).sum()), source_missing, int(data["statut_donnee"].astype(str).str.contains("fictif|demo", case=False, regex=True).sum())],
-    })
+    def missing_column(name):
+        if name not in data.columns:
+            return pd.Series(True, index=data.index)
+        values = data[name]
+        return values.isna() | values.astype(str).str.strip().eq("")
+
+    check_fields = {
+        "Année de référence": missing_column("annee"),
+        "Source documentaire": missing_column("source"),
+        "Niveau de fiabilité": missing_column("niveau_fiabilite"),
+        "Statut de la donnée": missing_column("statut_donnee"),
+        "Quantité mobilisable": missing_column("quantite_mobilisable_t_an"),
+        "Coordonnées (facultatives)": (
+            missing_column("latitude") | missing_column("longitude")
+        ),
+    }
+    issues = pd.DataFrame({"id_gisement": data["id_gisement"]})
+    issues["informations_a_completer"] = ""
+    quality_rows = []
+    for label, mask in check_fields.items():
+        count = int(mask.sum())
+        quality_rows.append({"Contrôle": label, "Lignes à compléter": count})
+        issues.loc[mask, "informations_a_completer"] += label + "; "
+
+    incomplete_costs = ~data["cout_complet"]
+    quality_rows.append({"Contrôle": "Au moins un poste de coût manquant", "Lignes à compléter": int(incomplete_costs.sum())})
+    issues.loc[incomplete_costs, "informations_a_completer"] += "Coûts incomplets; "
+    quality = pd.DataFrame(quality_rows)
     st.dataframe(quality, use_container_width=True, hide_index=True)
     st.caption("Les cellules inconnues restent manquantes ; elles ne sont pas remplacées par zéro.")
+    report = issues[issues["informations_a_completer"] != ""].copy()
+    if report.empty:
+        st.success("Aucune information manquante parmi les contrôles affichés.")
+    else:
+        st.markdown("#### Lignes à vérifier")
+        st.dataframe(report, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Télécharger le rapport des lignes à compléter",
+            report.to_csv(index=False).encode("utf-8-sig"),
+            "rapport_qualite_donnees.csv",
+            "text/csv",
+        )
     st.dataframe(data, use_container_width=True, hide_index=True)
     template = pd.DataFrame(columns=REQUIRED + ["province", "latitude", "longitude", "source", "niveau_fiabilite"])
     st.download_button("Télécharger un modèle CSV vide", template.to_csv(index=False).encode("utf-8-sig"), "modele_gisements.csv", "text/csv")
