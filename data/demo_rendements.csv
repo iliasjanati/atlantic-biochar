@@ -1,16 +1,16 @@
-﻿biomasse,rendement_biochar_pct,statut_donnee
-Palmes de palmier dattier,28,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Rachis de palmier dattier,30,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Régimes de palmier dattier,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Noyaux de dattes,35,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Coques d’amande,33,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Résidus de la filière argan,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Tiges de tomate,24,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Sarments de vigne,30,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Balles de riz,28,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Pulpe de betterave,22,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Résidus d’agrumes,25,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Grignons d’olive,34,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Paille de céréales,27,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Résidus de taille d’olivier,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
-Résidus de cactus,24,"FICTIF - HYPOTHESE DE TEST, A VALIDER"
+biomasse,rendement_biochar_pct,statut_donnee,carbone_biochar_pct_ms,fraction_carbone_stable_pct
+Palmes de palmier dattier,28,"FICTIF - HYPOTHESE DE TEST, A VALIDER",66,82
+Rachis de palmier dattier,30,"FICTIF - HYPOTHESE DE TEST, A VALIDER",67,82
+Régimes de palmier dattier,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER",65,80
+Noyaux de dattes,35,"FICTIF - HYPOTHESE DE TEST, A VALIDER",72,86
+Coques d’amande,33,"FICTIF - HYPOTHESE DE TEST, A VALIDER",70,84
+Résidus de la filière argan,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER",68,82
+Tiges de tomate,24,"FICTIF - HYPOTHESE DE TEST, A VALIDER",60,75
+Sarments de vigne,30,"FICTIF - HYPOTHESE DE TEST, A VALIDER",69,83
+Balles de riz,28,"FICTIF - HYPOTHESE DE TEST, A VALIDER",62,76
+Pulpe de betterave,22,"FICTIF - HYPOTHESE DE TEST, A VALIDER",58,72
+Résidus d’agrumes,25,"FICTIF - HYPOTHESE DE TEST, A VALIDER",60,74
+Grignons d’olive,34,"FICTIF - HYPOTHESE DE TEST, A VALIDER",72,86
+Paille de céréales,27,"FICTIF - HYPOTHESE DE TEST, A VALIDER",65,79
+Résidus de taille d’olivier,29,"FICTIF - HYPOTHESE DE TEST, A VALIDER",68,82
+Résidus de cactus,24,"FICTIF - HYPOTHESE DE TEST, A VALIDER",58,73

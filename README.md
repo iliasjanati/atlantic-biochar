@@ -28,17 +28,23 @@ Les hypothèses de scénario sont regroupées dans la barre latérale. Elles rè
 
 ### Approvisionnement régional
 
-Le modèle linéaire minimise les coûts d’approvisionnement pour couvrir une demande de biomasse dans une région donnée. Il respecte les quantités mobilisables et exclut les gisements dont un des cinq postes de coût est manquant.
+Le modèle choisit les gisements pour une quantité annuelle de biomasse fixée. Par défaut, il **maximise le carbone stable estimé dans le biochar** sous un budget annuel. Le mode « minimiser le coût » reste disponible pour comparer. La demande est fixée exactement afin que le modèle ne sélectionne pas tout le volume mobilisable par défaut.
 
 ### Choix du site
 
-Le modèle linéaire en nombres entiers mixtes choisit un site candidat au Maroc et les flux de biomasse à mobiliser. Il respecte les disponibilités, la capacité de traitement et une cible de production de biochar définie par l’utilisateur. Son objectif additionne le coût fixe annuel du site et les coûts variables d’approvisionnement et de transport estimé.
+Le modèle linéaire en nombres entiers mixtes choisit un seul site candidat et les flux de biomasse. Il respecte la disponibilité des gisements, la capacité de traitement et une cible minimale de production de biochar. L’objectif par défaut maximise le carbone stable estimé sous un budget qui comprend le coût fixe annualisé du site, les coûts variables d’approvisionnement et le transport estimé. Le mode « minimiser le coût » permet une comparaison.
 
-Les rendements préremplis depuis `data/demo_rendements.csv` et les sites de `data/demo_sites.csv` sont fictifs et modifiables. Le transport est estimé à partir de la distance à vol d’oiseau multipliée par un facteur de détour routier et un tarif en DH/t/km. Le coût de transport présent dans le fichier des gisements n’est pas repris dans cette optimisation, car il ne dépend pas du site choisi.
+Pour un gisement `g`, avec `x_g` tonnes de biomasse entrante/an, humidité `H_g`, rendement de biochar sur matière sèche `Y_g`, carbone du biochar `C_g` et fraction stable `P_g`, le stockage brut estimé est :
 
-Les rendements de démonstration préremplis proviennent de `data/demo_rendements.csv` et restent modifiables dans l’interface.
+`Carbone stable (tC/an) = Σ_g x_g × (1 − H_g/100) × Y_g × (C_g/100) × (P_g/100)`
 
-Ces résultats sont des estimations de prototype, pas des recommandations d’investissement. Les coûts de transformation, les itinéraires routiers réels, les effets de saisonnalité, la qualité des matières, les émissions et les contraintes réglementaires ne sont pas encore modélisés.
+`Stockage brut (tCO₂e/an) = Carbone stable (tC/an) × 44/12`
+
+Le modèle traite le rendement comme un pourcentage de la matière sèche. La fraction stable représente la part supposée du carbone du biochar qui reste stockée sur l’horizon considéré. Ces trois paramètres sont modifiables dans l’interface.
+
+Ce résultat est un **stockage brut potentiel dans le biochar**, pas un retrait net de CO₂. Le logiciel ne soustrait pas encore les émissions de séchage, pyrolyse, transport ou les émissions de référence et ne modélise pas les usages concurrents. Tous les paramètres des fichiers de démonstration sont fictifs et illustratifs, à remplacer par des mesures ou références validées avant toute conclusion réelle.
+
+Le transport du modèle de localisation est estimé depuis la distance à vol d’oiseau, multipliée par un facteur de détour routier et un tarif en DH/t/km. Le coût de transport fourni au niveau du gisement n’est pas repris dans cette optimisation, car le transport est recalculé selon le site choisi.
 
 ## Données des gisements
 
@@ -49,6 +55,10 @@ Importer un fichier CSV ou Excel (.xlsx). Pour Excel, la première feuille est l
 - `cout_achat_dh_t`, `cout_collecte_dh_t`, `cout_preparation_dh_t`, `cout_stockage_dh_t`, `cout_transport_dh_t`
 
 Les colonnes `latitude` et `longitude` sont facultatives pour l’exploration, mais nécessaires à l’optimisation du site. Le modèle CSV complet est téléchargeable dans **Données**. Les postes de coût peuvent être vides dans le fichier, mais les gisements incomplets ne sont pas admissibles aux calculs qui en ont besoin.
+
+Pour optimiser le carbone stocké dans le biochar, renseigner `humidite_pct` pour chaque gisement. Le carbone brut de la biomasse (`carbone_biomasse_pct_ms`) peut rester comme donnée descriptive, mais il ne détermine pas directement le carbone capturé par le biochar. Les paramètres de rendement, carbone du biochar et fraction stable sont modifiables dans **Optimiser → Paramètres du biochar**. Les valeurs par défaut sont fictives.
+
+Les résultats affichent le carbone stable estimé en tC/an et sa conversion en stockage brut tCO₂e/an. Ce n’est pas un bilan net du cycle de vie.
 
 ## Données des sites candidats
 
