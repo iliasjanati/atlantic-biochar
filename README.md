@@ -13,6 +13,8 @@ streamlit run app.py
 
 Sans import, l’application charge des données de démonstration fictives. Les fichiers de démonstration ne décrivent pas les ressources réelles du Maroc.
 
+Le jeu par défaut contient 42 lignes de gisements dans plusieurs régions et filières. Il comprend volontairement quelques valeurs manquantes pour essayer les contrôles qualité et comparer la faisabilité selon les coûts disponibles. Les sites candidats et rendements ont également des valeurs fictives pour tester l’optimisation.
+
 ## Parcours dans l’application
 
 - **Accueil** : quelques indicateurs nationaux et le volume mobilisable par type de biomasse.
@@ -32,7 +34,9 @@ Le modèle linéaire minimise les coûts d’approvisionnement pour couvrir une 
 
 Le modèle linéaire en nombres entiers mixtes choisit un site candidat au Maroc et les flux de biomasse à mobiliser. Il respecte les disponibilités, la capacité de traitement et une cible de production de biochar définie par l’utilisateur. Son objectif additionne le coût fixe annuel du site et les coûts variables d’approvisionnement et de transport estimé.
 
-Le rendement initial de conversion en biochar (30 %) et les sites de `data/demo_sites.csv` sont fictifs et modifiables. Le transport est estimé à partir de la distance à vol d’oiseau multipliée par un facteur de détour routier et un tarif en DH/t/km. Le coût de transport présent dans le fichier des gisements n’est pas repris dans cette optimisation, car il ne dépend pas du site choisi.
+Les rendements préremplis depuis `data/demo_rendements.csv` et les sites de `data/demo_sites.csv` sont fictifs et modifiables. Le transport est estimé à partir de la distance à vol d’oiseau multipliée par un facteur de détour routier et un tarif en DH/t/km. Le coût de transport présent dans le fichier des gisements n’est pas repris dans cette optimisation, car il ne dépend pas du site choisi.
+
+Les rendements de démonstration préremplis proviennent de `data/demo_rendements.csv` et restent modifiables dans l’interface.
 
 Ces résultats sont des estimations de prototype, pas des recommandations d’investissement. Les coûts de transformation, les itinéraires routiers réels, les effets de saisonnalité, la qualité des matières, les émissions et les contraintes réglementaires ne sont pas encore modélisés.
 

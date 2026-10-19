@@ -369,10 +369,17 @@ with optimize_tab:
                 st.error("Vérifie les coordonnées, les identifiants, les coûts fixes et les capacités des sites.")
             else:
                 biomass_names = sorted(data["biomasse"].dropna().unique())
+                try:
+                    demo_yields = pd.read_csv("data/demo_rendements.csv").set_index("biomasse")["rendement_biochar_pct"].to_dict()
+                except Exception:
+                    demo_yields = {}
                 with st.expander("Rendements de conversion en biochar"):
-                    st.caption("30 % est une hypothèse fictive de départ. Remplace-la par des données validées.")
+                    st.caption("Les valeurs préremplies sont des hypothèses fictives de test. Remplace-les par des rendements validés.")
                     yield_table = st.data_editor(
-                        pd.DataFrame({"Biomasse": biomass_names, "Rendement (%)": [30.0] * len(biomass_names)}),
+                        pd.DataFrame({
+                            "Biomasse": biomass_names,
+                            "Rendement (%)": [float(demo_yields.get(name, 30.0)) for name in biomass_names],
+                        }),
                         use_container_width=True,
                         hide_index=True,
                         disabled=["Biomasse"],

@@ -1,6 +1,9 @@
-id_site,nom_site,region,latitude,longitude,cout_fixe_dh_an,capacite_traitement_t_an
-SITE-DEMO-01,Site démonstration Errachidia,Drâa-Tafilalet,31.93,-4.42,350000,2500
-SITE-DEMO-02,Site démonstration Agadir,Souss-Massa,30.43,-9.60,420000,3000
-SITE-DEMO-03,Site démonstration Beni Mellal,Béni Mellal-Khénifra,32.34,-6.36,390000,2800
-SITE-DEMO-04,Site démonstration Kénitra,Rabat-Salé-Kénitra,34.26,-6.58,460000,3500
-SITE-DEMO-05,Site démonstration Berkane,Oriental,34.92,-2.32,410000,3000
+﻿id_site,nom_site,region,province,latitude,longitude,cout_fixe_dh_an,capacite_traitement_t_an,statut_donnee
+SITE-TEST-01,Site test - Errachidia,Drâa-Tafilalet,Errachidia,31.93,-4.42,620000,4800,FICTIF - JEU DE TEST
+SITE-TEST-02,Site test - Agadir,Souss-Massa,Agadir,30.42,-9.6,760000,6200,FICTIF - JEU DE TEST
+SITE-TEST-03,Site test - Meknès,Fès-Meknès,Meknès,33.89,-5.55,720000,6500,FICTIF - JEU DE TEST
+SITE-TEST-04,Site test - Kénitra,Rabat-Salé-Kénitra,Kénitra,34.26,-6.58,830000,7000,FICTIF - JEU DE TEST
+SITE-TEST-05,Site test - Béni Mellal,Béni Mellal-Khénifra,Béni Mellal,32.34,-6.35,690000,5600,FICTIF - JEU DE TEST
+SITE-TEST-06,Site test - Marrakech,Marrakech-Safi,Marrakech,31.63,-8.0,790000,6100,FICTIF - JEU DE TEST
+SITE-TEST-07,Site test - Berkane,Oriental,Berkane,34.92,-2.32,680000,5000,FICTIF - JEU DE TEST
+SITE-TEST-08,Site test - Guelmim,Guelmim-Oued Noun,Guelmim,28.99,-10.06,560000,4200,FICTIF - JEU DE TEST
