@@ -1,0 +1,6 @@
+id_site,nom_site,region,latitude,longitude,cout_fixe_dh_an,capacite_traitement_t_an
+SITE-DEMO-01,Site démonstration Errachidia,Drâa-Tafilalet,31.93,-4.42,350000,2500
+SITE-DEMO-02,Site démonstration Agadir,Souss-Massa,30.43,-9.60,420000,3000
+SITE-DEMO-03,Site démonstration Beni Mellal,Béni Mellal-Khénifra,32.34,-6.36,390000,2800
+SITE-DEMO-04,Site démonstration Kénitra,Rabat-Salé-Kénitra,34.26,-6.58,460000,3500
+SITE-DEMO-05,Site démonstration Berkane,Oriental,34.92,-2.32,410000,3000

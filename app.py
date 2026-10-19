@@ -10,18 +10,14 @@ QUANTITIES = ["quantite_theorique_t_an", "quantite_recuperable_t_an", "quantite_
 REQUIRED = ["id_gisement", "biomasse", "region", "annee", *QUANTITIES, *COSTS, "statut_donnee"]
 COORDINATES = ["latitude", "longitude"]
 
-st.title("🌱 Atlantic Biochar")
-st.caption("Système d’aide à la décision pour l’approvisionnement en biomasse")
 with st.sidebar:
-    st.header("Données")
+    st.header("Sources de données")
     upload = st.file_uploader("Importer les données (CSV ou Excel)", type=["csv", "xlsx"])
-    st.caption("Les CSV à séparateur virgule ou point-virgule et les classeurs Excel sont acceptés.")
-    st.caption("Sans import, le prototype utilise son jeu fictif de démonstration.")
-    st.divider()
-    st.header("Hypothèses de scénario")
-    availability = st.slider("Part mobilisable conservée (%)", 0, 100, 100, 5) / 100
-    transport_change = st.slider("Variation du coût de transport (%)", -50, 200, 0, 10)
-    other_change = st.slider("Variation des autres coûts (%)", -50, 200, 0, 10)
+    st.caption("CSV et Excel acceptés. Sans import, des données de démonstration sont utilisées.")
+    with st.expander("Hypothèses de scénario"):
+        availability = st.slider("Disponibilité conservée (%)", 0, 100, 100, 5) / 100
+        transport_change = st.slider("Variation du transport (%)", -50, 200, 0, 10)
+        other_change = st.slider("Variation des autres coûts (%)", -50, 200, 0, 10)
 
 
 def load_frame(file):
@@ -87,6 +83,12 @@ def add_scenario(frame):
         + frame["cout_transport_dh_t"] * (1 + transport_change / 100)
     )
     frame["volume_scenario_t_an"] = frame["quantite_mobilisable_t_an"] * availability
+    frame["depense_reference_dh_an"] = (
+        frame["cout_base_dh_t"] * frame["quantite_mobilisable_t_an"]
+    )
+    frame["depense_scenario_dh_an"] = (
+        frame["cout_scenario_dh_t"] * frame["volume_scenario_t_an"]
+    )
     return frame
 
 
@@ -121,231 +123,322 @@ def distance_km(lat1, lon1, lat2, lon2):
     return 2 * earth_radius_km * math.asin(math.sqrt(haversine))
 
 
+def solve_location(frame, sites, yields, demand, transport_rate, road_factor, allowed_biomasses, other_change=0, transport_change=0):
+    """Choose one facility site and biomass flows minimizing annualized cost."""
+    eligible = frame[
+        frame["biomasse"].isin(allowed_biomasses)
+        & frame[COSTS[:-1]].notna().all(axis=1)
+        & frame["volume_scenario_t_an"].notna()
+        & (frame["volume_scenario_t_an"] > 0)
+        & frame["latitude"].notna()
+        & frame["longitude"].notna()
+    ].copy()
+    candidates = sites.dropna(subset=["latitude", "longitude", "cout_fixe_dh_an", "capacite_traitement_t_an"]).copy()
+    candidates = candidates[(candidates["capacite_traitement_t_an"] > 0) & (candidates["cout_fixe_dh_an"] >= 0)]
+    eligible = eligible[eligible["biomasse"].map(yields).fillna(0) > 0]
+    if eligible.empty or candidates.empty:
+        return None, 0, "Aucun gisement avec coûts complets et coordonnées, ou aucun site candidat valide."
+
+    model = pulp.LpProblem("choix_site_et_approvisionnement", pulp.LpMinimize)
+    choose = {j: pulp.LpVariable(f"site_{j}", cat="Binary") for j in candidates.index}
+    flow = {}
+    unit_cost = {}
+    for i, source in eligible.iterrows():
+        # In this model transport is site-specific, so it is estimated from distance.
+        non_transport = sum(source[name] for name in COSTS[:-1]) * (1 + other_change / 100)
+        for j, site in candidates.iterrows():
+            key = (i, j)
+            flow[key] = pulp.LpVariable(f"flux_{i}_{j}", lowBound=0)
+            km = distance_km(source["latitude"], source["longitude"], site["latitude"], site["longitude"])
+            unit_cost[key] = non_transport + km * road_factor * transport_rate * (1 + transport_change / 100)
+    model += (
+        pulp.lpSum(candidates.loc[j, "cout_fixe_dh_an"] * choose[j] for j in candidates.index)
+        + pulp.lpSum(unit_cost[key] * variable for key, variable in flow.items())
+    )
+    model += pulp.lpSum(choose.values()) == 1
+    for i, source in eligible.iterrows():
+        model += pulp.lpSum(flow[(i, j)] for j in candidates.index) <= source["volume_scenario_t_an"]
+    for j, site in candidates.iterrows():
+        model += pulp.lpSum(flow[(i, j)] for i in eligible.index) <= site["capacite_traitement_t_an"] * choose[j]
+    model += pulp.lpSum(
+        yields[eligible.loc[i, "biomasse"]] * flow[(i, j)]
+        for i in eligible.index for j in candidates.index
+    ) >= demand
+    status = model.solve(pulp.PULP_CBC_CMD(msg=False))
+    if pulp.LpStatus[status] != "Optimal":
+        theoretical_max = min(
+            candidates["capacite_traitement_t_an"].max(),
+            sum(eligible["volume_scenario_t_an"] * eligible["biomasse"].map(yields)),
+        )
+        return None, float(theoretical_max), "Aucune solution faisable avec les capacités, rendements et volumes disponibles."
+
+    selected = next(j for j in candidates.index if (choose[j].value() or 0) > 0.5)
+    rows = []
+    for i, source in eligible.iterrows():
+        amount = flow[(i, selected)].value() or 0
+        if amount > 1e-6:
+            km = distance_km(source["latitude"], source["longitude"], candidates.loc[selected, "latitude"], candidates.loc[selected, "longitude"])
+            rows.append({
+                "id_gisement": source["id_gisement"],
+                "biomasse": source["biomasse"],
+                "quantite_matiere_t_an": amount,
+                "rendement_biochar_pct": yields[source["biomasse"]] * 100,
+                "biochar_estime_t_an": amount * yields[source["biomasse"]],
+                "distance_routiere_estimee_km": km * road_factor,
+                "cout_unitaire_estime_dh_t": unit_cost[(i, selected)],
+                "cout_annuel_estime_dh": amount * unit_cost[(i, selected)],
+            })
+    return {
+        "site": candidates.loc[selected],
+        "plan": pd.DataFrame(rows),
+        "cout_total": float(pulp.value(model.objective)),
+        "cout_fixe": float(candidates.loc[selected, "cout_fixe_dh_an"]),
+    }, float(sum(row["biochar_estime_t_an"] for row in rows)), None
+
+
 try:
     data, demo = load_frame(upload)
 except Exception as exc:
-    st.error(f"Lecture du fichier impossible : {exc}")
+    st.error(f"Impossible de lire le fichier : {exc}")
     st.stop()
+
 errors = validate(data)
 if errors:
-    st.error("Corrige les erreurs suivantes dans le fichier :")
+    st.error("Le fichier contient des erreurs à corriger :")
     for error in errors:
-        st.write(f"• {error}")
+        st.write(f"- {error}")
     st.stop()
 data = add_scenario(data)
+
+st.title("🌱 Atlantic Biochar")
+st.caption("Aide à la décision pour les ressources en biomasse au Maroc")
 if demo:
-    st.warning("Démonstration : toutes les valeurs sont fictives et ne décrivent pas les ressources réelles du Maroc.")
+    st.info("Démo : toutes les valeurs sont fictives. Elles servent uniquement à essayer le logiciel.")
 else:
-    st.success("Fichier importé. Les résultats dépendent de l’exactitude des données fournies.")
+    st.caption("Données importées. Vérifie leur source, leur année et leurs unités avant d’interpréter les résultats.")
 
-home, map_tab, site_tab, compare, optimize, quality_tab = st.tabs(["Tableau de bord", "Carte", "Proximité d’un site", "Comparer les régions", "Plan d’approvisionnement", "Qualité des données"])
-with home:
-    st.subheader("Vue d’ensemble")
-    a, b, c, d = st.columns(4)
-    a.metric("Gisements", f"{len(data):,}")
-    b.metric("Biomasses", f"{data['biomasse'].nunique():,}")
-    c.metric("Régions", f"{data['region'].nunique():,}")
-    d.metric("Coûts complets", f"{int(data['cout_complet'].sum())} / {len(data)}")
-    biomass_summary = data.groupby("biomasse", as_index=False).agg(volume_t_an=("volume_scenario_t_an", "sum"), gisements=("id_gisement", "count")).sort_values("volume_t_an", ascending=False)
+home_tab, explore_tab, optimize_tab, data_tab = st.tabs(["Accueil", "Explorer", "Optimiser", "Données"])
+
+with home_tab:
+    st.subheader("Synthèse nationale")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Gisements", f"{len(data):,}")
+    col2.metric("Types de biomasse", f"{data['biomasse'].nunique():,}")
+    col3.metric("Volume mobilisable", f"{data['volume_scenario_t_an'].sum(min_count=1):,.0f} t/an")
+    biomass_summary = data.groupby("biomasse", as_index=False).agg(
+        volume_t_an=("volume_scenario_t_an", "sum"),
+        gisements=("id_gisement", "count"),
+    ).sort_values("volume_t_an", ascending=False)
+    st.markdown("#### Ressources par biomasse")
     st.bar_chart(biomass_summary.set_index("biomasse")["volume_t_an"])
-    st.dataframe(biomass_summary, use_container_width=True, hide_index=True)
-    st.caption("Les volumes agrégés ne garantissent pas une disponibilité contractuelle pour une usine.")
+    st.caption("Les estimations ne garantissent pas une disponibilité contractuelle pour une usine.")
 
-with map_tab:
-    st.subheader("Carte des gisements")
-    st.caption("Les points de démonstration sont fictifs et indicatifs ; ils ne montrent pas l’emplacement réel de gisements.")
-    if not all(name in data.columns for name in COORDINATES):
-        st.info("Ce fichier ne contient pas encore les colonnes latitude et longitude. Télécharge le modèle CSV dans l’onglet Qualité des données.")
-    else:
-        map_biomasses = sorted(data["biomasse"].dropna().unique())
-        map_regions = sorted(data["region"].dropna().unique())
-        selected_map_biomasses = st.multiselect("Biomasses sur la carte", map_biomasses, default=map_biomasses, key="map_biomasses")
-        selected_map_regions = st.multiselect("Régions sur la carte", map_regions, default=map_regions, key="map_regions")
-        mapped = data[
-            data["biomasse"].isin(selected_map_biomasses)
-            & data["region"].isin(selected_map_regions)
-            & data["latitude"].notna()
-            & data["longitude"].notna()
-        ].copy()
-        if mapped.empty:
-            st.info("Aucun gisement sélectionné n’a de coordonnées complètes.")
-        else:
-            volume = mapped["volume_scenario_t_an"].fillna(0)
-            spread = volume.max() - volume.min()
-            mapped["taille_point"] = 12 if spread == 0 else 12 + 36 * (volume - volume.min()) / spread
-            st.map(mapped, latitude="latitude", longitude="longitude", size="taille_point")
-            st.caption("La taille des points représente le volume mobilisable simulé. Le niveau de précision dépend des coordonnées fournies.")
-            map_columns = ["id_gisement", "biomasse", "region", "latitude", "longitude", "volume_scenario_t_an", "statut_donnee"]
-            st.dataframe(mapped[map_columns], use_container_width=True, hide_index=True)
-
-with site_tab:
-    st.subheader("Proximité d’un site candidat")
-    st.write("Saisis les coordonnées d’un site d’usine candidat pour examiner sa proximité avec les gisements localisés.")
-    st.warning("Les distances calculées sont à vol d’oiseau. Elles ne représentent ni les trajets routiers ni un coût de transport.")
-    site_name = st.text_input("Nom du site candidat", placeholder="Ex. Site A")
-    site_col1, site_col2 = st.columns(2)
-    with site_col1:
-        site_lat_text = st.text_input("Latitude du site", placeholder="Ex. 31.93")
-    with site_col2:
-        site_lon_text = st.text_input("Longitude du site", placeholder="Ex. -4.42")
-    if not all(name in data.columns for name in COORDINATES):
-        st.info("Le fichier chargé ne contient pas de coordonnées de gisements.")
-    elif not site_lat_text.strip() or not site_lon_text.strip():
-        st.info("Entre la latitude et la longitude du site pour afficher les distances.")
-    else:
-        try:
-            site_lat, site_lon = float(site_lat_text), float(site_lon_text)
-            if not (-90 <= site_lat <= 90 and -180 <= site_lon <= 180):
-                raise ValueError("Coordonnées hors limites.")
-        except ValueError:
-            st.error("Entre des coordonnées numériques valides : latitude de -90 à 90 et longitude de -180 à 180.")
-        else:
-            located = data[data["latitude"].notna() & data["longitude"].notna()].copy()
-            if located.empty:
-                st.info("Aucun gisement n’a de coordonnées complètes.")
-            else:
-                located["distance_a_vol_doiseau_km"] = located.apply(
-                    lambda row: distance_km(site_lat, site_lon, row["latitude"], row["longitude"]),
-                    axis=1,
-                )
-                located = located.sort_values("distance_a_vol_doiseau_km")
-                if site_name.strip():
-                    st.caption(f"Distances depuis : {site_name.strip()}")
-                nearest = located.iloc[0]
-                k1, k2 = st.columns(2)
-                k1.metric("Gisement le plus proche", str(nearest["id_gisement"]))
-                k2.metric("Distance à vol d’oiseau", f"{nearest['distance_a_vol_doiseau_km']:.1f} km")
-                radius_text = st.text_input("Rayon de comparaison facultatif (km)", placeholder="Laisse vide pour ne pas filtrer")
-                if radius_text.strip():
-                    try:
-                        radius = float(radius_text)
-                        if radius <= 0:
-                            raise ValueError("Le rayon doit être positif.")
-                        in_radius = located[located["distance_a_vol_doiseau_km"] <= radius]
-                        st.metric(f"Volume mobilisable dans {radius:g} km à vol d’oiseau", f"{in_radius['volume_scenario_t_an'].sum():,.0f} t/an")
-                    except ValueError:
-                        st.error("Saisis un rayon positif en kilomètres.")
-                distance_columns = ["id_gisement", "biomasse", "region", "distance_a_vol_doiseau_km", "volume_scenario_t_an", "cout_scenario_dh_t"]
-                st.dataframe(located[distance_columns], use_container_width=True, hide_index=True)
-
-with compare:
-    st.subheader("Comparer les régions")
-    biomasses = sorted(data["biomasse"].dropna().unique())
+with explore_tab:
+    st.subheader("Explorer les ressources")
     regions = sorted(data["region"].dropna().unique())
-    bs = st.multiselect("Biomasses", biomasses, default=biomasses, key="compare_b")
-    rs = st.multiselect("Régions", regions, default=regions, key="compare_r")
-    subset = data[data["biomasse"].isin(bs) & data["region"].isin(rs)].copy()
+    biomasses = sorted(data["biomasse"].dropna().unique())
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_regions = st.multiselect("Régions", regions, default=regions, key="explore_regions")
+    with col2:
+        selected_biomasses = st.multiselect("Biomasses", biomasses, default=biomasses, key="explore_biomasses")
+    subset = data[data["region"].isin(selected_regions) & data["biomasse"].isin(selected_biomasses)].copy()
     if subset.empty:
-        st.info("Sélectionne au moins une biomasse et une région.")
+        st.info("Choisis au moins une région et une biomasse.")
     else:
-        summary = subset.groupby("region", as_index=False).agg(gisements=("id_gisement", "count"), volume_scenario_t_an=("volume_scenario_t_an", "sum"))
-        cost = subset[subset["cout_complet"]].copy()
-        cost["cout_volume"] = cost["cout_scenario_dh_t"] * cost["volume_scenario_t_an"]
-        weighted = cost.groupby("region").agg(total=("cout_volume", "sum"), volume=("volume_scenario_t_an", "sum"))
-        weighted["cout_moyen_pondere_dh_t"] = weighted["total"] / weighted["volume"].where(weighted["volume"] > 0)
-        summary = summary.merge(weighted[["cout_moyen_pondere_dh_t"]], left_on="region", right_index=True, how="left")
+        group_label = st.radio("Afficher par", ["Région", "Biomasse"], horizontal=True)
+        group_key = "region" if group_label == "Région" else "biomasse"
+        summary = subset.groupby(group_key, as_index=False).agg(
+            volume_mobilisable_t_an=("volume_scenario_t_an", "sum"),
+            nombre_gisements=("id_gisement", "count"),
+        ).sort_values("volume_mobilisable_t_an", ascending=False)
+        st.bar_chart(summary.set_index(group_key)["volume_mobilisable_t_an"])
         st.dataframe(summary, use_container_width=True, hide_index=True)
-        st.markdown("#### Compromis entre volume et coût")
-        plot = summary.dropna(subset=["cout_moyen_pondere_dh_t"])
-        if not plot.empty:
-            st.scatter_chart(plot, x="cout_moyen_pondere_dh_t", y="volume_scenario_t_an", color="region")
-        st.caption("Le coût moyen couvre seulement les gisements aux coûts complets. Ce n’est pas un classement absolu de sites.")
 
-        st.markdown("#### Coût minimal pour un même besoin annuel")
-        common_demand = st.number_input("Besoin à comparer (t/an)", min_value=1, value=100, step=10)
-        if st.button("Comparer la faisabilité et le coût par région"):
-            comparisons = []
-            for candidate in rs:
-                candidate_pool = subset[subset["region"] == candidate]
-                plan, available = solve_supply(candidate_pool, float(common_demand))
-                comparisons.append({
-                    "region": candidate,
-                    "besoin_t_an": common_demand,
-                    "volume_eligible_t_an": available,
-                    "faisable": plan is not None,
-                    "cout_annuel_minimal_dh": plan["cout_annuel_dh"].sum() if plan is not None else None,
-                    "cout_moyen_dh_t": (
-                        plan["cout_annuel_dh"].sum() / plan["quantite_a_approvisionner_t_an"].sum()
-                        if plan is not None else None
-                    ),
-                })
-            comparison = pd.DataFrame(comparisons).sort_values(
-                ["faisable", "cout_annuel_minimal_dh"], ascending=[False, True], na_position="last"
-            )
-            st.dataframe(comparison, use_container_width=True, hide_index=True)
-            st.caption("Une région est faisable si ses gisements aux coûts complets peuvent couvrir le besoin. Le coût minimal est calculé séparément pour chaque région.")
+        with st.expander("Carte des gisements"):
+            if not all(name in data.columns for name in COORDINATES):
+                st.info("Le fichier n’a pas de colonnes de coordonnées.")
+            else:
+                mapped = subset.dropna(subset=COORDINATES).copy()
+                if mapped.empty:
+                    st.info("Aucun gisement sélectionné n’a de coordonnées complètes.")
+                else:
+                    mapped["taille_point"] = 18
+                    st.map(mapped, latitude="latitude", longitude="longitude", size="taille_point")
+                    st.caption("Les positions dépendent de la précision des coordonnées saisies. Les points de démo sont fictifs.")
 
-with optimize:
-    st.subheader("Plan d’approvisionnement au coût minimal")
-    st.write("Le modèle répartit le besoin entre les gisements d’une région, sans dépasser les volumes simulés disponibles. Les coûts incomplets sont exclus.")
-    regions = sorted(data["region"].dropna().unique())
-    region = st.selectbox("Région candidate", regions)
-    biomasses = sorted(data["biomasse"].dropna().unique())
-    allowed = st.multiselect("Biomasses autorisées", biomasses, default=biomasses, key="opt_b")
-    pool = data[(data["region"] == region) & data["biomasse"].isin(allowed)]
-    max_supply = pool.loc[pool["cout_complet"], "volume_scenario_t_an"].sum()
-    maximum = max(1, int(max_supply) if pd.notna(max_supply) else 1)
-    demand = st.number_input("Besoin annuel de l’usine (t/an)", min_value=1, max_value=maximum, value=min(100, maximum), step=10)
-    if st.button("Calculer le plan", type="primary"):
-        plan, supply = solve_supply(pool, float(demand))
-        if plan is None:
-            st.error(f"Approvisionnement impossible avec les données complètes. Volume disponible : {supply:,.0f} t/an ; besoin : {demand:,.0f} t/an.")
-        else:
-            qty = plan["quantite_a_approvisionner_t_an"].sum()
-            total_cost = plan["cout_annuel_dh"].sum()
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Besoin couvert", f"{qty:,.0f} t/an")
-            m2.metric("Coût annuel estimé", f"{total_cost:,.0f} DH/an")
-            m3.metric("Coût moyen", f"{total_cost / qty:,.0f} DH/t")
-            cols = ["id_gisement", "biomasse", "quantite_a_approvisionner_t_an", "cout_scenario_dh_t", "cout_annuel_dh"]
-            st.dataframe(plan[cols], use_container_width=True, hide_index=True)
-            st.download_button("Télécharger le plan CSV", plan[cols].to_csv(index=False).encode("utf-8-sig"), "plan_approvisionnement.csv", "text/csv")
-            st.caption("Optimisation linéaire du coût avec les données et hypothèses saisies. Distances routières, stocks et saisons ne sont pas encore modélisés.")
+        with st.expander("Comparer les coûts entre régions"):
+            cost_rows = subset[subset["cout_complet"] & subset["volume_scenario_t_an"].notna()].copy()
+            if cost_rows.empty:
+                st.info("Aucun coût complet dans cette sélection.")
+            else:
+                cost_rows["depense_estimee_dh_an"] = cost_rows["cout_scenario_dh_t"] * cost_rows["volume_scenario_t_an"]
+                comparison = cost_rows.groupby("region", as_index=False).agg(
+                    volume_t_an=("volume_scenario_t_an", "sum"),
+                    depense_dh_an=("depense_estimee_dh_an", "sum"),
+                )
+                comparison["cout_moyen_dh_t"] = comparison["depense_dh_an"] / comparison["volume_t_an"].where(comparison["volume_t_an"] > 0)
+                st.dataframe(comparison, use_container_width=True, hide_index=True)
+                st.caption("Estimation sur les volumes complets en coût ; ce n’est pas le coût d’un plan d’usine.")
 
-with quality_tab:
-    st.subheader("Qualité et traçabilité")
-    def missing_column(name):
-        if name not in data.columns:
-            return pd.Series(True, index=data.index)
-        values = data[name]
-        return values.isna() | values.astype(str).str.strip().eq("")
+        with st.expander("Distances indicatives depuis un point"):
+            if not all(name in data.columns for name in COORDINATES):
+                st.info("Les coordonnées des gisements sont nécessaires.")
+            else:
+                coord1, coord2 = st.columns(2)
+                lat = coord1.number_input("Latitude", min_value=-90.0, max_value=90.0, value=31.63, format="%.4f")
+                lon = coord2.number_input("Longitude", min_value=-180.0, max_value=180.0, value=-7.99, format="%.4f")
+                located = subset.dropna(subset=COORDINATES).copy()
+                if not located.empty:
+                    located["distance_directe_km"] = located.apply(
+                        lambda row: distance_km(lat, lon, row["latitude"], row["longitude"]), axis=1
+                    )
+                    located = located.sort_values("distance_directe_km")
+                    st.dataframe(
+                        located[["id_gisement", "biomasse", "region", "distance_directe_km", "volume_scenario_t_an"]],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.caption("Distance à vol d’oiseau, sans calcul d’itinéraire ni de coût routier.")
 
-    check_fields = {
-        "Année de référence": missing_column("annee"),
-        "Source documentaire": missing_column("source"),
-        "Niveau de fiabilité": missing_column("niveau_fiabilite"),
-        "Statut de la donnée": missing_column("statut_donnee"),
-        "Quantité mobilisable": missing_column("quantite_mobilisable_t_an"),
-        "Coordonnées (facultatives)": (
-            missing_column("latitude") | missing_column("longitude")
-        ),
-    }
-    issues = pd.DataFrame({"id_gisement": data["id_gisement"]})
-    issues["informations_a_completer"] = ""
-    quality_rows = []
-    for label, mask in check_fields.items():
-        count = int(mask.sum())
-        quality_rows.append({"Contrôle": label, "Lignes à compléter": count})
-        issues.loc[mask, "informations_a_completer"] += label + "; "
-
-    incomplete_costs = ~data["cout_complet"]
-    quality_rows.append({"Contrôle": "Au moins un poste de coût manquant", "Lignes à compléter": int(incomplete_costs.sum())})
-    issues.loc[incomplete_costs, "informations_a_completer"] += "Coûts incomplets; "
-    quality = pd.DataFrame(quality_rows)
-    st.dataframe(quality, use_container_width=True, hide_index=True)
-    st.caption("Les cellules inconnues restent manquantes ; elles ne sont pas remplacées par zéro.")
-    report = issues[issues["informations_a_completer"] != ""].copy()
-    if report.empty:
-        st.success("Aucune information manquante parmi les contrôles affichés.")
+with optimize_tab:
+    st.subheader("Optimiser")
+    method = st.radio(
+        "Choisis le type de calcul",
+        ["Choix du site d’implantation", "Approvisionnement d’une région"],
+        horizontal=True,
+    )
+    if method == "Approvisionnement d’une région":
+        st.write("Répartit une demande de biomasse entre les gisements sélectionnés, au coût minimal.")
+        region = st.selectbox("Région", regions, key="supply_region")
+        allowed = st.multiselect("Biomasses", biomasses, default=biomasses, key="supply_biomasses")
+        pool = data[(data["region"] == region) & data["biomasse"].isin(allowed)]
+        max_supply = pool.loc[pool["cout_complet"], "volume_scenario_t_an"].sum()
+        max_value = max(1, int(max_supply) if pd.notna(max_supply) else 1)
+        demand = st.number_input("Besoin de biomasse (t/an)", min_value=1, max_value=max_value, value=min(100, max_value), step=10)
+        if st.button("Calculer l’approvisionnement", type="primary"):
+            plan, available = solve_supply(pool, float(demand))
+            if plan is None:
+                st.error(f"Besoin impossible à couvrir : {available:,.0f} t/an disponibles pour {demand:,.0f} t/an demandées.")
+            else:
+                annual_cost = plan["cout_annuel_dh"].sum()
+                st.metric("Coût annuel minimal estimé", f"{annual_cost:,.0f} DH/an")
+                columns = ["id_gisement", "biomasse", "quantite_a_approvisionner_t_an", "cout_scenario_dh_t", "cout_annuel_dh"]
+                st.dataframe(plan[columns], use_container_width=True, hide_index=True)
+                st.download_button("Télécharger le plan CSV", plan[columns].to_csv(index=False).encode("utf-8-sig"), "plan_approvisionnement.csv", "text/csv")
     else:
-        st.markdown("#### Lignes à vérifier")
-        st.dataframe(report, use_container_width=True, hide_index=True)
+        st.write("Sélectionne un site candidat et un approvisionnement pour atteindre une production annuelle cible de biochar.")
+        site_upload = st.file_uploader("Sites candidats (CSV)", type=["csv"], key="site_candidates_upload")
+        if site_upload is None:
+            sites = pd.read_csv("data/demo_sites.csv")
+            st.caption("Sites fictifs chargés pour la démonstration.")
+        else:
+            try:
+                sample = site_upload.getvalue()[:8192].decode("utf-8-sig", errors="replace")
+                separator = ";" if sample.count(";") > sample.count(",") else ","
+                site_upload.seek(0)
+                sites = pd.read_csv(site_upload, sep=separator, decimal="," if separator == ";" else ".", encoding="utf-8-sig")
+            except Exception as exc:
+                st.error(f"Impossible de lire les sites candidats : {exc}")
+                sites = pd.DataFrame()
+
+        site_columns = ["id_site", "nom_site", "latitude", "longitude", "cout_fixe_dh_an", "capacite_traitement_t_an"]
         st.download_button(
-            "Télécharger le rapport des lignes à compléter",
-            report.to_csv(index=False).encode("utf-8-sig"),
-            "rapport_qualite_donnees.csv",
+            "Télécharger le modèle des sites",
+            pd.DataFrame(columns=site_columns).to_csv(index=False).encode("utf-8-sig"),
+            "modele_sites_candidats.csv",
             "text/csv",
         )
-    st.dataframe(data, use_container_width=True, hide_index=True)
-    template = pd.DataFrame(columns=REQUIRED + ["province", "latitude", "longitude", "source", "niveau_fiabilite"])
-    st.download_button("Télécharger un modèle CSV vide", template.to_csv(index=False).encode("utf-8-sig"), "modele_gisements.csv", "text/csv")
+        if not set(site_columns).issubset(sites.columns):
+            st.error("Le CSV doit contenir les colonnes du modèle téléchargé.")
+        elif not all(name in data.columns for name in COORDINATES):
+            st.error("Les gisements doivent avoir des coordonnées pour estimer le transport.")
+        else:
+            for name in ["latitude", "longitude", "cout_fixe_dh_an", "capacite_traitement_t_an"]:
+                sites[name] = pd.to_numeric(sites[name], errors="coerce")
+            invalid_sites = (
+                sites.empty
+                or sites[site_columns[2:]].isna().any().any()
+                or sites["id_site"].duplicated().any()
+                or (sites["cout_fixe_dh_an"] < 0).any()
+                or (sites["capacite_traitement_t_an"] <= 0).any()
+                or (sites["latitude"].abs() > 90).any()
+                or (sites["longitude"].abs() > 180).any()
+            )
+            if invalid_sites:
+                st.error("Vérifie les coordonnées, les identifiants, les coûts fixes et les capacités des sites.")
+            else:
+                biomass_names = sorted(data["biomasse"].dropna().unique())
+                with st.expander("Rendements de conversion en biochar"):
+                    st.caption("30 % est une hypothèse fictive de départ. Remplace-la par des données validées.")
+                    yield_table = st.data_editor(
+                        pd.DataFrame({"Biomasse": biomass_names, "Rendement (%)": [30.0] * len(biomass_names)}),
+                        use_container_width=True,
+                        hide_index=True,
+                        disabled=["Biomasse"],
+                        column_config={"Rendement (%)": st.column_config.NumberColumn(min_value=0.1, max_value=100.0, step=0.5)},
+                        key="biomass_yields_editor",
+                    )
+                yields = dict(zip(yield_table["Biomasse"], yield_table["Rendement (%)"].astype(float) / 100))
+                c1, c2, c3 = st.columns(3)
+                target = c1.number_input("Production visée (t biochar/an)", min_value=1.0, value=100.0, step=10.0)
+                rate = c2.number_input("Tarif transport (DH/t/km)", min_value=0.0, value=0.8, step=0.1)
+                road_factor = c3.number_input("Facteur de détour routier", min_value=1.0, value=1.3, step=0.1)
+                selected_biomass = st.multiselect("Biomasses admissibles", biomass_names, default=biomass_names, key="location_biomasses")
+                st.caption("Le coût réunit les frais fixes annuels du site, achat, collecte, préparation, stockage et transport estimé. Les hypothèses de scénario de la barre latérale s’appliquent aussi ici.")
+                with st.expander("Voir les sites candidats"):
+                    st.dataframe(sites, use_container_width=True, hide_index=True)
+                if st.button("Lancer l’optimisation", type="primary"):
+                    solution, max_output, issue = solve_location(
+                        data, sites, yields, target, rate, road_factor, selected_biomass,
+                        other_change=other_change, transport_change=transport_change,
+                    )
+                    if solution is None:
+                        st.error(f"Aucune solution réalisable. {issue} Production maximale indicative : {max_output:,.1f} t/an.")
+                    else:
+                        site = solution["site"]
+                        plan = solution["plan"]
+                        r1, r2, r3 = st.columns(3)
+                        r1.metric("Site choisi par le modèle", str(site["nom_site"]))
+                        r2.metric("Biochar estimé", f"{max_output:,.1f} t/an")
+                        r3.metric("Coût annuel modélisé", f"{solution['cout_total']:,.0f} DH/an")
+                        st.dataframe(plan, use_container_width=True, hide_index=True)
+                        st.download_button("Télécharger le plan optimisé", plan.to_csv(index=False).encode("utf-8-sig"), "plan_optimisation_site.csv", "text/csv")
+                        st.caption("Résultat indicatif du modèle, pas une recommandation d’investissement.")
+
+with data_tab:
+    st.subheader("Données et qualité")
+    source_missing = (
+        data["source"].isna() | data["source"].astype(str).str.strip().eq("")
+        if "source" in data.columns else pd.Series(True, index=data.index)
+    )
+    coordinates_missing = (
+        data[COORDINATES].isna().any(axis=1)
+        if all(name in data.columns for name in COORDINATES) else pd.Series(True, index=data.index)
+    )
+    checks = {
+        "Source absente": source_missing,
+        "Quantité mobilisable absente": data["quantite_mobilisable_t_an"].isna(),
+        "Coordonnées absentes": coordinates_missing,
+        "Coûts incomplets": ~data["cout_complet"],
+    }
+    report = pd.DataFrame({
+        "Contrôle": list(checks),
+        "Lignes concernées": [int(mask.sum()) for mask in checks.values()],
+    })
+    st.dataframe(report, use_container_width=True, hide_index=True)
+    issue_rows = pd.DataFrame({"id_gisement": data["id_gisement"]})
+    issue_rows["a_completer"] = ""
+    for label, mask in checks.items():
+        issue_rows.loc[mask, "a_completer"] += label + "; "
+    issue_rows = issue_rows[issue_rows["a_completer"] != ""]
+    if not issue_rows.empty:
+        st.download_button("Télécharger le rapport qualité", issue_rows.to_csv(index=False).encode("utf-8-sig"), "rapport_qualite_donnees.csv", "text/csv")
+    st.download_button(
+        "Télécharger le modèle des gisements",
+        pd.DataFrame(columns=REQUIRED + ["province", "latitude", "longitude", "source", "niveau_fiabilite"]).to_csv(index=False).encode("utf-8-sig"),
+        "modele_gisements.csv",
+        "text/csv",
+    )
+    with st.expander("Afficher les lignes importées"):
+        st.dataframe(data, use_container_width=True, hide_index=True)

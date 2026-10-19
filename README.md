@@ -1,128 +1,61 @@
-# Système d’aide à la décision pour Atlantic Biochar
+# Atlantic Biochar
 
-Prototype étudiant visant à comparer, à l’échelle nationale du Maroc, les ressources en résidus agricoles pouvant alimenter de futures unités de production de biochar.
+Prototype Streamlit d’aide à la décision pour étudier l’approvisionnement en biomasse et le choix d’un site de production de biochar au Maroc.
 
-## Objectif
+## Utilisation
 
-Le logiciel aidera à examiner, par biomasse et par zone géographique, les quantités de résidus mobilisables et leurs coûts d’approvisionnement. Il devra rendre visibles les sources, les hypothèses et les données manquantes afin de soutenir la décision sans présenter une estimation comme une certitude.
+Dans un terminal ouvert à la racine du projet :
 
-Les données réelles seront fournies ultérieurement par l’entreprise. Pendant le développement, le prototype pourra utiliser des jeux de données fictifs clairement identifiés, uniquement pour tester son fonctionnement.
-
-## Périmètre initial
-
-Le prototype prévoit de prendre en charge les filières suivantes :
-
-- Résidus du palmier dattier : palmes, rachis, régimes et noyaux.
-- Coques d’amande.
-- Résidus de la filière argan.
-- Tiges de tomate.
-- Sarments de vigne.
-- Balles de riz.
-- Pulpes de betterave.
-- Résidus d’agrumes.
-- Autres biomasses pertinentes, ajoutées lorsqu’elles sont documentées.
-
-La précision géographique dépendra des données disponibles. Le logiciel ne devra pas afficher une précision communale ou cartographique si les données ne la justifient pas.
-
-## Fonctions prévues pour le MVP
-
-- Importer et consulter des données de gisements depuis un fichier tabulaire.
-- Distinguer les quantités théoriques, récupérables et mobilisables.
-- Comparer les quantités mobilisables par biomasse et par région ou province.
-- Calculer les coûts d’approvisionnement lorsque les postes nécessaires sont renseignés.
-- Signaler les champs manquants, les incohérences et les unités utilisées.
-- Indiquer la provenance et le statut de chaque donnée : entreprise, fictive ou hypothèse à confirmer.
-- Présenter des tableaux et graphiques comparatifs, puis exporter une synthèse.
-
-## Principes de données
-
-- Une valeur inconnue reste vide ou signalée comme manquante ; elle n’est pas remplacée par zéro.
-- Les données fictives ne sont jamais présentées comme des statistiques réelles du Maroc.
-- Chaque donnée importante doit conserver sa source, son année et son unité.
-- Les quantités théoriques ne sont pas assimilées automatiquement à une ressource disponible pour l’usine.
-- Les résultats dépendent des hypothèses et de la qualité des données fournies.
-
-## Calculs prévus
-
-Lorsque les coûts sont disponibles et exprimés dans des unités compatibles :
-
-```text
-Coût d’approvisionnement (DH/t)
-  = achat + collecte + préparation + stockage + transport
-
-Coût annuel estimé (DH/an)
-  = quantité mobilisable (t/an) × coût d’approvisionnement (DH/t)
+```bash
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-Si un poste nécessaire manque, le logiciel devra signaler que le coût est partiel ou impossible à calculer.
+Sans import, l’application charge des données de démonstration fictives. Les fichiers de démonstration ne décrivent pas les ressources réelles du Maroc.
 
-## Technologies envisagées
+## Parcours dans l’application
 
-Le choix technique initial est volontairement simple : Python pour les calculs, Streamlit pour l’interface, Pandas pour la manipulation des tableaux et des fichiers Excel ou CSV pour l’échange de données. Ces choix pourront évoluer selon les besoins du prototype.
+- **Accueil** : quelques indicateurs nationaux et le volume mobilisable par type de biomasse.
+- **Explorer** : filtres par région et biomasse, comparaison des volumes, carte, comparaison indicative des coûts et distances à vol d’oiseau.
+- **Optimiser** : choix entre un plan d’approvisionnement régional et l’optimisation nationale du site.
+- **Données** : contrôles de complétude, téléchargement du rapport qualité et modèles CSV.
 
-## Limites du prototype
+Les hypothèses de scénario sont regroupées dans la barre latérale. Elles règlent la disponibilité et les variations de coûts pour les analyses concernées.
 
-Le MVP ne constitue pas une étude de faisabilité industrielle. Le classement de sites, l’optimisation complète des flux, l’analyse de cycle de vie complète, la validation des performances de pyrolyse et les vérifications foncières ou réglementaires nécessiteront des données et des travaux complémentaires.
+## Optimisations
 
-## État du projet
+### Approvisionnement régional
 
-Le projet est au stade de cadrage. La prochaine étape de développement consiste à préparer un modèle de données et un jeu fictif explicitement marqué comme données de test, puis à créer l’importation et les contrôles de cohérence.
+Le modèle linéaire minimise les coûts d’approvisionnement pour couvrir une demande de biomasse dans une région donnée. Il respecte les quantités mobilisables et exclut les gisements dont un des cinq postes de coût est manquant.
 
-## Lancer le prototype
+### Choix du site
 
-1. Ouvre ce dossier dans Visual Studio Code.
-2. Dans le terminal intégré, installe les dépendances :
+Le modèle linéaire en nombres entiers mixtes choisit un site candidat au Maroc et les flux de biomasse à mobiliser. Il respecte les disponibilités, la capacité de traitement et une cible de production de biochar définie par l’utilisateur. Son objectif additionne le coût fixe annuel du site et les coûts variables d’approvisionnement et de transport estimé.
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+Le rendement initial de conversion en biochar (30 %) et les sites de `data/demo_sites.csv` sont fictifs et modifiables. Le transport est estimé à partir de la distance à vol d’oiseau multipliée par un facteur de détour routier et un tarif en DH/t/km. Le coût de transport présent dans le fichier des gisements n’est pas repris dans cette optimisation, car il ne dépend pas du site choisi.
 
-3. Lance l’application :
+Ces résultats sont des estimations de prototype, pas des recommandations d’investissement. Les coûts de transformation, les itinéraires routiers réels, les effets de saisonnalité, la qualité des matières, les émissions et les contraintes réglementaires ne sont pas encore modélisés.
 
-   ```bash
-   streamlit run app.py
-   ```
+## Données des gisements
 
-L’application s’ouvre dans un navigateur. Sans import de fichier, elle utilise `data/demo_gisements.csv`, un jeu fictif de démonstration.
+Importer un fichier CSV ou Excel (.xlsx). Pour Excel, la première feuille est lue. Le CSV peut utiliser une virgule ou un point-virgule comme séparateur. Les en-têtes obligatoires sont :
 
-## Format CSV attendu
-
-Le fichier importé doit contenir les colonnes suivantes. Les cinq colonnes de coût doivent exister, mais leurs cellules peuvent rester vides si l’information n’est pas connue.
-
-- `id_gisement`, `biomasse`, `region`, `annee`
+- `id_gisement`, `biomasse`, `region`, `annee`, `statut_donnee`
 - `quantite_theorique_t_an`, `quantite_recuperable_t_an`, `quantite_mobilisable_t_an`
 - `cout_achat_dh_t`, `cout_collecte_dh_t`, `cout_preparation_dh_t`, `cout_stockage_dh_t`, `cout_transport_dh_t`
-- `statut_donnee`
 
-Le fichier de démonstration comprend aussi des colonnes complémentaires telles que la province, l’humidité, la saison, la source et la fiabilité. Les coûts sont additionnés uniquement lorsque les cinq postes sont renseignés.
+Les colonnes `latitude` et `longitude` sont facultatives pour l’exploration, mais nécessaires à l’optimisation du site. Le modèle CSV complet est téléchargeable dans **Données**. Les postes de coût peuvent être vides dans le fichier, mais les gisements incomplets ne sont pas admissibles aux calculs qui en ont besoin.
 
-## Fonctions de décision du prototype
+## Données des sites candidats
 
-L’application comprend quatre vues :
+Dans **Optimiser → Choix du site d’implantation**, importer un CSV avec les colonnes :
 
-- **Tableau de bord** : volumes simulés, nombre de gisements et graphiques par biomasse.
-- **Comparer les régions** : comparaison des volumes et des coûts moyens pondérés, avec un graphique de compromis entre coût et disponibilité.
-- **Plan d’approvisionnement** : pour une région candidate et un besoin annuel, un modèle linéaire répartit l’approvisionnement entre les gisements admissibles afin de minimiser le coût total.
-- **Qualité des données** : champs manquants, coûts incomplets et téléchargement d’un modèle CSV vide.
+`id_site`, `nom_site`, `latitude`, `longitude`, `cout_fixe_dh_an`, `capacite_traitement_t_an`
 
-Les contrôles de scénario permettent de réduire les volumes mobilisables et de faire varier séparément les coûts de transport et les autres coûts. Les gisements dont un poste de coût manque sont exclus de l’optimisation.
+Le logiciel permet de télécharger un modèle CSV vide.
 
-### Limites du calcul d’approvisionnement
+## Principes
 
-Le modèle choisit les quantités par gisement pour couvrir un besoin annuel au coût estimé le plus faible, sous la limite des volumes simulés disponibles. Il suppose que les volumes indiqués sont accessibles. Dans cette version, la région sert à sélectionner les gisements ; les distances routières, la saisonnalité détaillée, le stockage, les contraintes de mélange et l’emplacement précis de l’usine ne sont pas modélisés. Le résultat est une estimation de prototype, pas une recommandation d’investissement.
-
-La comparaison régionale permet également de choisir un besoin annuel commun et de calculer, pour chaque région sélectionnée, si ce besoin est faisable avec les coûts renseignés et quel serait le coût minimal estimé.
-
-## Carte interactive
-
-L’onglet **Carte** affiche les gisements qui possèdent une latitude et une longitude valides. Les points de démonstration portent des coordonnées indicatives fictives et ne représentent pas les emplacements réels des gisements. Pour des données d’entreprise, saisir les coordonnées réellement fournies. Le modèle CSV téléchargeable inclut maintenant les colonnes `latitude` et `longitude`.
-
-## Proximité d’un site candidat
-
-L’onglet **Proximité d’un site** accepte les coordonnées d’un emplacement candidat, calcule la distance à vol d’oiseau vers chaque gisement localisé, puis affiche les gisements du plus proche au plus éloigné. Un rayon facultatif permet de sommer le volume mobilisable simulé à l’intérieur de cette distance directe. Ce calcul sert au pré-diagnostic spatial uniquement : il ne calcule ni trajet routier ni coût de transport.
-
-## Formats de données acceptés
-
-L’import accepte les fichiers `.csv` et `.xlsx`. Pour Excel, le premier onglet est lu. Pour les CSV, le séparateur virgule ou point-virgule est détecté automatiquement ; les virgules décimales sont prises en charge dans les CSV séparés par des points-virgules. Les colonnes doivent conserver les noms du modèle téléchargeable.
-
-L’onglet **Qualité des données** signale aussi les sources, années, niveaux de fiabilité, quantités et coordonnées à compléter. Il permet de télécharger un rapport par gisement pour faciliter les corrections avant l’analyse.
+- Les valeurs manquantes restent manquantes ; elles ne sont pas remplacées par zéro.
+- Toute donnée fictive ou hypothèse de démonstration doit être remplacée par une donnée vérifiée avant une étude réelle.
+- Les résultats dépendent des sources, des unités et des hypothèses saisies.
