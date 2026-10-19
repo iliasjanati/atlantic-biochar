@@ -112,3 +112,7 @@ Les contrôles de scénario permettent de réduire les volumes mobilisables et d
 Le modèle choisit les quantités par gisement pour couvrir un besoin annuel au coût estimé le plus faible, sous la limite des volumes simulés disponibles. Il suppose que les volumes indiqués sont accessibles. Dans cette version, la région sert à sélectionner les gisements ; les distances routières, la saisonnalité détaillée, le stockage, les contraintes de mélange et l’emplacement précis de l’usine ne sont pas modélisés. Le résultat est une estimation de prototype, pas une recommandation d’investissement.
 
 La comparaison régionale permet également de choisir un besoin annuel commun et de calculer, pour chaque région sélectionnée, si ce besoin est faisable avec les coûts renseignés et quel serait le coût minimal estimé.
+
+## Carte interactive
+
+L’onglet **Carte** affiche les gisements qui possèdent une latitude et une longitude valides. Les points de démonstration portent des coordonnées indicatives fictives et ne représentent pas les emplacements réels des gisements. Pour des données d’entreprise, saisir les coordonnées réellement fournies. Le modèle CSV téléchargeable inclut maintenant les colonnes `latitude` et `longitude`.

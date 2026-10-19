@@ -6,6 +6,7 @@ st.set_page_config(page_title="Atlantic Biochar", page_icon="🌱", layout="wide
 COSTS = ["cout_achat_dh_t", "cout_collecte_dh_t", "cout_preparation_dh_t", "cout_stockage_dh_t", "cout_transport_dh_t"]
 QUANTITIES = ["quantite_theorique_t_an", "quantite_recuperable_t_an", "quantite_mobilisable_t_an"]
 REQUIRED = ["id_gisement", "biomasse", "region", "annee", *QUANTITIES, *COSTS, "statut_donnee"]
+COORDINATES = ["latitude", "longitude"]
 
 st.title("🌱 Atlantic Biochar")
 st.caption("Système d’aide à la décision pour l’approvisionnement en biomasse")
@@ -34,6 +35,12 @@ def validate(frame):
         frame[name] = pd.to_numeric(frame[name], errors="coerce")
         if (original.notna() & frame[name].isna()).any():
             errors.append(f"{name} contient une valeur non numérique.")
+    for name in COORDINATES:
+        if name in frame.columns:
+            original = frame[name].copy()
+            frame[name] = pd.to_numeric(frame[name], errors="coerce")
+            if (original.notna() & frame[name].isna()).any():
+                errors.append(f"{name} contient une coordonnée non numérique.")
     for name in [*QUANTITIES, *COSTS]:
         if (frame[name].dropna() < 0).any():
             errors.append(f"{name} contient une valeur négative.")
@@ -43,6 +50,10 @@ def validate(frame):
         errors.append(f"{int(invalid.sum())} ligne(s) incohérentes : mobilisable ≤ récupérable ≤ théorique attendu.")
     if frame["id_gisement"].isna().any() or frame["id_gisement"].duplicated().any():
         errors.append("Les identifiants doivent être renseignés et uniques.")
+    if "latitude" in frame.columns and ((frame["latitude"].dropna().abs() > 90).any()):
+        errors.append("Les latitudes doivent être comprises entre -90 et 90.")
+    if "longitude" in frame.columns and ((frame["longitude"].dropna().abs() > 180).any()):
+        errors.append("Les longitudes doivent être comprises entre -180 et 180.")
     return errors
 
 
@@ -97,7 +108,7 @@ if demo:
 else:
     st.success("Fichier importé. Les résultats dépendent de l’exactitude des données fournies.")
 
-home, compare, optimize, quality_tab = st.tabs(["Tableau de bord", "Comparer les régions", "Plan d’approvisionnement", "Qualité des données"])
+home, map_tab, compare, optimize, quality_tab = st.tabs(["Tableau de bord", "Carte", "Comparer les régions", "Plan d’approvisionnement", "Qualité des données"])
 with home:
     st.subheader("Vue d’ensemble")
     a, b, c, d = st.columns(4)
@@ -109,6 +120,33 @@ with home:
     st.bar_chart(biomass_summary.set_index("biomasse")["volume_t_an"])
     st.dataframe(biomass_summary, use_container_width=True, hide_index=True)
     st.caption("Les volumes agrégés ne garantissent pas une disponibilité contractuelle pour une usine.")
+
+with map_tab:
+    st.subheader("Carte des gisements")
+    st.caption("Les points de démonstration sont fictifs et indicatifs ; ils ne montrent pas l’emplacement réel de gisements.")
+    if not all(name in data.columns for name in COORDINATES):
+        st.info("Ce fichier ne contient pas encore les colonnes latitude et longitude. Télécharge le modèle CSV dans l’onglet Qualité des données.")
+    else:
+        map_biomasses = sorted(data["biomasse"].dropna().unique())
+        map_regions = sorted(data["region"].dropna().unique())
+        selected_map_biomasses = st.multiselect("Biomasses sur la carte", map_biomasses, default=map_biomasses, key="map_biomasses")
+        selected_map_regions = st.multiselect("Régions sur la carte", map_regions, default=map_regions, key="map_regions")
+        mapped = data[
+            data["biomasse"].isin(selected_map_biomasses)
+            & data["region"].isin(selected_map_regions)
+            & data["latitude"].notna()
+            & data["longitude"].notna()
+        ].copy()
+        if mapped.empty:
+            st.info("Aucun gisement sélectionné n’a de coordonnées complètes.")
+        else:
+            volume = mapped["volume_scenario_t_an"].fillna(0)
+            spread = volume.max() - volume.min()
+            mapped["taille_point"] = 12 if spread == 0 else 12 + 36 * (volume - volume.min()) / spread
+            st.map(mapped, latitude="latitude", longitude="longitude", size="taille_point")
+            st.caption("La taille des points représente le volume mobilisable simulé. Le niveau de précision dépend des coordonnées fournies.")
+            map_columns = ["id_gisement", "biomasse", "region", "latitude", "longitude", "volume_scenario_t_an", "statut_donnee"]
+            st.dataframe(mapped[map_columns], use_container_width=True, hide_index=True)
 
 with compare:
     st.subheader("Comparer les régions")
@@ -194,5 +232,5 @@ with quality_tab:
     st.dataframe(quality, use_container_width=True, hide_index=True)
     st.caption("Les cellules inconnues restent manquantes ; elles ne sont pas remplacées par zéro.")
     st.dataframe(data, use_container_width=True, hide_index=True)
-    template = pd.DataFrame(columns=REQUIRED + ["province", "source", "niveau_fiabilite"])
+    template = pd.DataFrame(columns=REQUIRED + ["province", "latitude", "longitude", "source", "niveau_fiabilite"])
     st.download_button("Télécharger un modèle CSV vide", template.to_csv(index=False).encode("utf-8-sig"), "modele_gisements.csv", "text/csv")
