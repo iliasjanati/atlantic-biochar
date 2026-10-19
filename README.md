@@ -67,3 +67,48 @@ Le MVP ne constitue pas une étude de faisabilité industrielle. Le classement d
 ## État du projet
 
 Le projet est au stade de cadrage. La prochaine étape de développement consiste à préparer un modèle de données et un jeu fictif explicitement marqué comme données de test, puis à créer l’importation et les contrôles de cohérence.
+
+## Lancer le prototype
+
+1. Ouvre ce dossier dans Visual Studio Code.
+2. Dans le terminal intégré, installe les dépendances :
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Lance l’application :
+
+   ```bash
+   streamlit run app.py
+   ```
+
+L’application s’ouvre dans un navigateur. Sans import de fichier, elle utilise `data/demo_gisements.csv`, un jeu fictif de démonstration.
+
+## Format CSV attendu
+
+Le fichier importé doit contenir les colonnes suivantes. Les cinq colonnes de coût doivent exister, mais leurs cellules peuvent rester vides si l’information n’est pas connue.
+
+- `id_gisement`, `biomasse`, `region`, `annee`
+- `quantite_theorique_t_an`, `quantite_recuperable_t_an`, `quantite_mobilisable_t_an`
+- `cout_achat_dh_t`, `cout_collecte_dh_t`, `cout_preparation_dh_t`, `cout_stockage_dh_t`, `cout_transport_dh_t`
+- `statut_donnee`
+
+Le fichier de démonstration comprend aussi des colonnes complémentaires telles que la province, l’humidité, la saison, la source et la fiabilité. Les coûts sont additionnés uniquement lorsque les cinq postes sont renseignés.
+
+## Fonctions de décision du prototype
+
+L’application comprend quatre vues :
+
+- **Tableau de bord** : volumes simulés, nombre de gisements et graphiques par biomasse.
+- **Comparer les régions** : comparaison des volumes et des coûts moyens pondérés, avec un graphique de compromis entre coût et disponibilité.
+- **Plan d’approvisionnement** : pour une région candidate et un besoin annuel, un modèle linéaire répartit l’approvisionnement entre les gisements admissibles afin de minimiser le coût total.
+- **Qualité des données** : champs manquants, coûts incomplets et téléchargement d’un modèle CSV vide.
+
+Les contrôles de scénario permettent de réduire les volumes mobilisables et de faire varier séparément les coûts de transport et les autres coûts. Les gisements dont un poste de coût manque sont exclus de l’optimisation.
+
+### Limites du calcul d’approvisionnement
+
+Le modèle choisit les quantités par gisement pour couvrir un besoin annuel au coût estimé le plus faible, sous la limite des volumes simulés disponibles. Il suppose que les volumes indiqués sont accessibles. Dans cette version, la région sert à sélectionner les gisements ; les distances routières, la saisonnalité détaillée, le stockage, les contraintes de mélange et l’emplacement précis de l’usine ne sont pas modélisés. Le résultat est une estimation de prototype, pas une recommandation d’investissement.
+
+La comparaison régionale permet également de choisir un besoin annuel commun et de calculer, pour chaque région sélectionnée, si ce besoin est faisable avec les coûts renseignés et quel serait le coût minimal estimé.

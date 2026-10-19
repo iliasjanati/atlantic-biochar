@@ -1,0 +1,11 @@
+id_gisement,biomasse,region,province,annee,quantite_theorique_t_an,quantite_recuperable_t_an,quantite_mobilisable_t_an,cout_achat_dh_t,cout_collecte_dh_t,cout_preparation_dh_t,cout_stockage_dh_t,cout_transport_dh_t,humidite_pct,saison_disponibilite,statut_donnee,source,niveau_fiabilite
+DEMO-001,Palmes de palmier dattier,Drâa-Tafilalet,Errachidia,2025,1200,700,280,0,140,90,35,160,18,Octobre-Mars,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-002,Coques d’amande,Fès-Meknès,Sefrou,2025,450,360,200,320,40,25,20,110,10,Septembre-Novembre,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-003,Tiges de tomate,Souss-Massa,Chtouka-Aït Baha,2025,800,480,150,,75,120,45,210,72,Mai-Juillet,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-004,Sarments de vigne,Béni Mellal-Khénifra,Béni Mellal,2025,600,420,190,80,65,55,30,130,20,Janvier-Mars,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-005,Balles de riz,Rabat-Salé-Kénitra,Kénitra,2025,300,240,100,150,35,20,15,65,12,Juillet-Septembre,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-006,Pulpes de betterave,Oriental,Berkane,2025,900,500,210,50,55,80,40,125,78,Octobre-Janvier,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-007,Résidus d’agrumes,Gharb-Chrarda-Béni Hssen,Kénitra,2025,700,420,175,25,90,100,50,180,68,Novembre-Avril,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-008,Rachis de palmier dattier,Drâa-Tafilalet,Zagora,2025,500,320,140,0,150,95,45,170,22,Octobre-Mars,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-009,Résidus de la filière argan,Souss-Massa,Essaouira,2025,350,190,80,100,120,75,40,230,30,Variable,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
+DEMO-010,Noyaux de dattes,Drâa-Tafilalet,Errachidia,2025,200,170,90,250,30,20,15,85,8,Variable,FICTIVE - DEMONSTRATION,Donnée générée pour tester l’application,Non applicable
