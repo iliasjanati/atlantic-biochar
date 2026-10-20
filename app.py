@@ -108,34 +108,105 @@ def stable_carbon_factor(source, biochar_yield, char_carbon_pct, stable_fraction
     return (1 - moisture / 100) * biochar_yield * char_carbon_pct / 100 * stable_fraction_pct / 100
 
 
-def solve_supply(frame, demand, char_params, objective, budget=None):
+def net_carbon_factor(source, biochar_yield, char_carbon_pct, stable_fraction_pct,
+                      process_emissions_kgco2e_t, transport_emissions_kgco2e_t_km,
+                      distance_km_value=0):
+    """Estimated net life-cycle removal (tCO2e/t as-received feedstock).
+
+    Stable carbon is converted to CO2 equivalent, then process and transport
+    emissions are subtracted. This is only as complete as the supplied factors.
+    """
+    stored_tc = stable_carbon_factor(source, biochar_yield, char_carbon_pct, stable_fraction_pct)
+    if stored_tc is None:
+        return None
+    process_tco2e = process_emissions_kgco2e_t / 1000
+    transport_tco2e = transport_emissions_kgco2e_t_km * distance_km_value / 1000
+    return stored_tc * 44 / 12 - process_tco2e - transport_tco2e
+
+
+def edit_lca_factors(biomasses, key):
+    """Collect user-provided LCA factors; zero is an explicit placeholder."""
+    factors = pd.DataFrame([
+        {"Biomasse": biomass, "Émissions hors transport (kgCO₂e/t biomasse)": 0.0}
+        for biomass in biomasses
+    ])
+    st.caption("Renseigne les émissions mesurées ou issues de ton ACV. 0 signifie donnée inconnue et surestime le bilan net.")
+    edited = st.data_editor(
+        factors,
+        disabled=["Biomasse"],
+        hide_index=True,
+        use_container_width=True,
+        key=key,
+        column_config={
+            "Émissions hors transport (kgCO₂e/t biomasse)": st.column_config.NumberColumn(
+                min_value=0.0, step=1.0, format="%.2f"
+            )
+        },
+    )
+    return {
+        row["Biomasse"]: float(row["Émissions hors transport (kgCO₂e/t biomasse)"])
+        for _, row in edited.iterrows()
+    }
+
+
+def solve_supply(frame, demand, char_params, budget, capture_target_pct,
+                 lca_emissions_by_biomass, transport_emissions_kgco2e_t_km,
+                 average_transport_distance_km):
     eligible = frame[frame["cout_complet"] & frame["volume_scenario_t_an"].notna() & (frame["volume_scenario_t_an"] > 0)].copy()
     eligible = eligible.dropna(subset=["humidite_pct"])
     eligible["carbone_stable_par_t_entree_tC"] = eligible.apply(
         lambda row: stable_carbon_factor(row, *char_params[row["biomasse"]]), axis=1
     )
     eligible = eligible.dropna(subset=["carbone_stable_par_t_entree_tC"])
+    eligible["emissions_lca_par_t_entree_tCO2e"] = eligible.apply(
+        lambda row: (
+            lca_emissions_by_biomass.get(row["biomasse"], 0.0)
+            + transport_emissions_kgco2e_t_km * average_transport_distance_km
+        ) / 1000,
+        axis=1,
+    )
+    eligible["carbone_net_lca_par_t_entree_tCO2e"] = eligible.apply(
+        lambda row: net_carbon_factor(
+            row, *char_params[row["biomasse"]],
+            lca_emissions_by_biomass.get(row["biomasse"], 0.0),
+            transport_emissions_kgco2e_t_km,
+            average_transport_distance_km,
+        ),
+        axis=1,
+    )
     available = float(eligible["volume_scenario_t_an"].sum())
-    theoretical_max = float((eligible["volume_scenario_t_an"] * eligible["carbone_stable_par_t_entree_tC"]).sum())
+    theoretical_max = float((eligible["volume_scenario_t_an"] * eligible["carbone_net_lca_par_t_entree_tCO2e"]).sum())
     if available + 1e-8 < demand:
         return None, available, theoretical_max
-    model = pulp.LpProblem("plan_approvisionnement", pulp.LpMinimize if objective == "Minimiser le coût" else pulp.LpMaximize)
+    model = pulp.LpProblem("plan_approvisionnement", pulp.LpMaximize)
     x = {i: pulp.LpVariable(f"q_{i}", lowBound=0, upBound=row["volume_scenario_t_an"]) for i, row in eligible.iterrows()}
     total_cost = pulp.lpSum(x[i] * row["cout_scenario_dh_t"] for i, row in eligible.iterrows())
-    captured = pulp.lpSum(x[i] * eligible.loc[i, "carbone_stable_par_t_entree_tC"] for i in eligible.index)
-    model += total_cost if objective == "Minimiser le coût" else captured
+    net_capture = pulp.lpSum(x[i] * eligible.loc[i, "carbone_net_lca_par_t_entree_tCO2e"] for i in eligible.index)
+    model += net_capture
     model += pulp.lpSum(x.values()) == demand
-    if objective != "Minimiser le coût":
-        model += total_cost <= budget
+    model += total_cost <= budget
     status = model.solve(pulp.PULP_CBC_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
         return None, available, theoretical_max
+    max_capture = float(pulp.value(net_capture))
+    if max_capture <= 0:
+        return None, available, max_capture
+    model += net_capture >= max_capture * capture_target_pct / 100
+    model.sense = pulp.LpMinimize
+    model.setObjective(total_cost)
+    status = model.solve(pulp.PULP_CBC_CMD(msg=False))
+    if pulp.LpStatus[status] != "Optimal":
+        return None, available, max_capture
     eligible["quantite_a_approvisionner_t_an"] = [x[i].value() or 0 for i in eligible.index]
     plan = eligible[eligible["quantite_a_approvisionner_t_an"] > 1e-6].copy()
     plan["cout_annuel_dh"] = plan["quantite_a_approvisionner_t_an"] * plan["cout_scenario_dh_t"]
     plan["carbone_stable_estime_tC_an"] = plan["quantite_a_approvisionner_t_an"] * plan["carbone_stable_par_t_entree_tC"]
     plan["stockage_brut_estime_tCO2e_an"] = plan["carbone_stable_estime_tC_an"] * 44 / 12
-    return plan, available, theoretical_max
+    plan["emissions_lca_estimees_tCO2e_an"] = plan["quantite_a_approvisionner_t_an"] * plan["emissions_lca_par_t_entree_tCO2e"]
+    plan["carbone_net_lca_estime_tCO2e_an"] = (
+        plan["stockage_brut_estime_tCO2e_an"] - plan["emissions_lca_estimees_tCO2e_an"]
+    )
+    return plan, available, max_capture
 
 def carbon_in_dry_feedstock(as_received_t, source):
     """Tonnes of carbon entering with dry feedstock; not a carbon-removal estimate."""
@@ -161,8 +232,9 @@ def distance_km(lat1, lon1, lat2, lon2):
 
 
 def solve_location(frame, sites, char_params, demand, transport_rate, road_factor, allowed_biomasses,
-                   objective, budget=None, other_change=0, transport_change=0):
-    """Choose one facility site and feedstock flows for cost or stable-carbon objective."""
+                   budget, capture_target_pct, lca_emissions_by_biomass,
+                   transport_emissions_kgco2e_t_km, other_change=0, transport_change=0):
+    """Choose one facility site and feedstock flows for cost/net-LCA objective."""
     eligible = frame[
         frame["biomasse"].isin(allowed_biomasses)
         & frame[COSTS[:-1]].notna().all(axis=1)
@@ -185,9 +257,9 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
         float(candidates["capacite_traitement_t_an"].max()),
         float((eligible["volume_scenario_t_an"] * eligible["rendement_biochar"] * (1 - eligible["humidite_pct"] / 100)).sum()),
     )
-    model = pulp.LpProblem("choix_site_et_approvisionnement", pulp.LpMinimize if objective == "Minimiser le coût" else pulp.LpMaximize)
+    model = pulp.LpProblem("choix_site_et_approvisionnement", pulp.LpMaximize)
     choose = {j: pulp.LpVariable(f"site_{j}", cat="Binary") for j in candidates.index}
-    flow, unit_cost = {}, {}
+    flow, unit_cost, net_carbon_factor_by_flow = {}, {}, {}
     for i, source in eligible.iterrows():
         non_transport = sum(source[name] for name in COSTS[:-1]) * (1 + other_change / 100)
         for j, site in candidates.iterrows():
@@ -195,13 +267,19 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
             flow[key] = pulp.LpVariable(f"flux_{i}_{j}", lowBound=0)
             km = distance_km(source["latitude"], source["longitude"], site["latitude"], site["longitude"])
             unit_cost[key] = non_transport + km * road_factor * transport_rate * (1 + transport_change / 100)
+            road_km = km * road_factor
+            process_emissions = lca_emissions_by_biomass.get(source["biomasse"], 0.0)
+            net_carbon_factor_by_flow[key] = net_carbon_factor(
+                source, *char_params[source["biomasse"]], process_emissions,
+                transport_emissions_kgco2e_t_km, road_km,
+            )
     fixed_cost = pulp.lpSum(candidates.loc[j, "cout_fixe_dh_an"] * choose[j] for j in candidates.index)
     variable_cost = pulp.lpSum(unit_cost[key] * variable for key, variable in flow.items())
     total_cost = fixed_cost + variable_cost
-    stable_carbon = pulp.lpSum(
-        eligible.loc[i, "carbone_stable_par_t_entree_tC"] * variable for (i, j), variable in flow.items()
+    net_carbon = pulp.lpSum(
+        net_carbon_factor_by_flow[key] * variable for key, variable in flow.items()
     )
-    model += total_cost if objective == "Minimiser le coût" else stable_carbon
+    model += net_carbon
     model += pulp.lpSum(choose.values()) == 1
     for i, source in eligible.iterrows():
         model += pulp.lpSum(flow[(i, j)] for j in candidates.index) <= source["volume_scenario_t_an"]
@@ -211,11 +289,19 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
         (1 - eligible.loc[i, "humidite_pct"] / 100) * eligible.loc[i, "rendement_biochar"] * flow[(i, j)]
         for i in eligible.index for j in candidates.index
     ) >= demand
-    if objective != "Minimiser le coût":
-        model += total_cost <= budget
+    model += total_cost <= budget
     status = model.solve(pulp.PULP_CBC_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
         return None, float(theoretical_max), "Aucune solution faisable. Vérifie le budget, la cible de biochar et les disponibilités."
+    max_capture = float(pulp.value(net_carbon))
+    if max_capture <= 0:
+        return None, float(theoretical_max), "Le bilan ACV estimé est nul ou négatif avec les facteurs renseignés."
+    model += net_carbon >= max_capture * capture_target_pct / 100
+    model.sense = pulp.LpMinimize
+    model.setObjective(total_cost)
+    status = model.solve(pulp.PULP_CBC_CMD(msg=False))
+    if pulp.LpStatus[status] != "Optimal":
+        return None, float(theoretical_max), "Impossible de trouver un compromis coût-carbone faisable."
     selected = next(j for j in candidates.index if (choose[j].value() or 0) > 0.5)
     rows = []
     for i, source in eligible.iterrows():
@@ -224,6 +310,11 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
             km = distance_km(source["latitude"], source["longitude"], candidates.loc[selected, "latitude"], candidates.loc[selected, "longitude"])
             char_t = amount * (1 - source["humidite_pct"] / 100) * char_params[source["biomasse"]][0]
             stable_tc = amount * source["carbone_stable_par_t_entree_tC"]
+            emissions_tco2e = amount * (
+                lca_emissions_by_biomass.get(source["biomasse"], 0.0)
+                + transport_emissions_kgco2e_t_km * km * road_factor
+            ) / 1000
+            gross_storage_tco2e = stable_tc * 44 / 12
             rows.append({
                 "id_gisement": source["id_gisement"], "biomasse": source["biomasse"],
                 "quantite_matiere_t_an": amount,
@@ -231,7 +322,9 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
                 "carbone_biochar_pct_ms": char_params[source["biomasse"]][1],
                 "fraction_carbone_stable_pct": char_params[source["biomasse"]][2],
                 "carbone_stable_estime_tC_an": stable_tc,
-                "stockage_brut_estime_tCO2e_an": stable_tc * 44 / 12,
+                "stockage_brut_estime_tCO2e_an": gross_storage_tco2e,
+                "emissions_lca_estimees_tCO2e_an": emissions_tco2e,
+                "carbone_net_lca_estime_tCO2e_an": gross_storage_tco2e - emissions_tco2e,
                 "distance_routiere_estimee_km": km * road_factor,
                 "cout_unitaire_estime_dh_t": unit_cost[(i, selected)],
                 "cout_annuel_estime_dh": amount * unit_cost[(i, selected)],
@@ -239,7 +332,8 @@ def solve_location(frame, sites, char_params, demand, transport_rate, road_facto
     plan = pd.DataFrame(rows)
     return {"site": candidates.loc[selected], "plan": plan,
             "cout_total": float(pulp.value(total_cost)),
-            "cout_fixe": float(candidates.loc[selected, "cout_fixe_dh_an"])}, float(plan["biochar_estime_t_an"].sum()), None
+            "cout_fixe": float(candidates.loc[selected, "cout_fixe_dh_an"]),
+            "capture_max_tCO2e_net": max_capture}, float(plan["biochar_estime_t_an"].sum()), None
 
 
 try:
@@ -350,12 +444,22 @@ with explore_tab:
 with optimize_tab:
     st.subheader("Optimiser")
     method = st.radio("Choisis le type de calcul", ["Choix du site d’implantation", "Approvisionnement d’une région"], horizontal=True)
-    objective_options = ["Maximiser le carbone durable estimé", "Minimiser le coût"]
     if method == "Approvisionnement d’une région":
-        st.write("Pour une quantité annuelle donnée, choisir les gisements qui maximisent le carbone stable estimé dans le biochar ou minimisent le coût.")
+        st.write("Pour une quantité annuelle fixée, maximiser le retrait net estimé après émissions ACV, puis minimiser le coût.")
         region = st.selectbox("Région", regions, key="supply_region")
         allowed = st.multiselect("Biomasses", biomasses, default=biomasses, key="supply_biomasses")
         pool = data[(data["region"] == region) & data["biomasse"].isin(allowed)]
+        lca_emissions = edit_lca_factors(allowed, "supply_lca_factors")
+        lca_col1, lca_col2 = st.columns(2)
+        average_transport_distance = lca_col1.number_input(
+            "Distance moyenne d’approvisionnement (km)", min_value=0.0, value=100.0, step=10.0
+        )
+        transport_emissions = lca_col2.number_input(
+            "Émissions du transport (kg CO₂e/t/km)", min_value=0.0, value=0.0, step=0.01,
+            help="À renseigner selon le véhicule et le facteur d’émission retenus dans l’ACV."
+        )
+        if any(value == 0 for value in lca_emissions.values()) or transport_emissions == 0:
+            st.warning("Facteurs d’émissions à 0 : ils sont considérés comme inconnus. Le retrait net affiché est alors surestimé.")
         max_supply = pool.loc[pool["cout_complet"], "volume_scenario_t_an"].sum()
         max_value = max(1, int(max_supply) if pd.notna(max_supply) else 1)
         demand = st.number_input("Quantité de biomasse à approvisionner (t/an)", min_value=1, max_value=max_value, value=min(100, max_value), step=10)
@@ -374,23 +478,31 @@ with optimize_tab:
                     "Fraction stable (%)": float(row.get("fraction_carbone_stable_pct", defaults["fraction_carbone_stable_pct"]))})
             char_table = st.data_editor(pd.DataFrame(rows), disabled=["Biomasse"], hide_index=True, use_container_width=True, key="supply_char_params")
         char_params = {r["Biomasse"]: (float(r["Rendement biochar (%)"])/100, float(r["Carbone du biochar (%)"]), float(r["Fraction stable (%)"])) for _, r in char_table.iterrows()}
-        objective = st.radio("Objectif", objective_options, horizontal=True, key="supply_objective")
-        budget = st.number_input("Budget maximal annuel (DH/an)", min_value=0.0, value=2_000_000.0, step=100_000.0, key="supply_budget") if objective == objective_options[0] else None
-        if st.button("Calculer le plan", type="primary"):
-            plan, available, max_carbon = solve_supply(pool, float(demand), char_params, "Minimiser le coût" if objective == objective_options[1] else "Maximiser le carbone", budget)
+        c1, c2 = st.columns(2)
+        budget = c1.number_input("Budget maximal annuel (DH/an)", min_value=0.0, value=2_000_000.0, step=100_000.0, key="supply_budget")
+        capture_target = c2.slider("Part du retrait net maximal à conserver (%)", 50, 100, 90, 5, key="supply_capture_target")
+        st.caption("Le calcul maximise le stockage stable moins les émissions ACV renseignées, sous budget, puis minimise le coût en conservant la part de retrait net choisie.")
+        if st.button("Calculer le compromis", type="primary"):
+            plan, available, max_carbon = solve_supply(
+                pool, float(demand), char_params, budget, capture_target,
+                lca_emissions, transport_emissions, average_transport_distance
+            )
             if plan is None:
-                st.error(f"Aucune solution faisable. Volume admissible : {available:,.0f} t/an ; carbone stable théorique maximal : {max_carbon:,.1f} tC/an. Vérifie le budget.")
+                st.error(f"Aucune solution ACV faisable. Volume admissible : {available:,.0f} t/an ; retrait net maximal estimé : {max_carbon:,.1f} tCO₂e/an. Vérifie le budget, les émissions et les données.")
             else:
                 stable_tc = plan["carbone_stable_estime_tC_an"].sum()
+                net_tco2e = plan["carbone_net_lca_estime_tCO2e_an"].sum()
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Carbone stable estimé", f"{stable_tc:,.2f} tC/an")
-                c2.metric("Stockage brut estimé", f"{stable_tc * 44 / 12:,.2f} tCO₂e/an")
+                c1.metric("Retrait net ACV estimé", f"{net_tco2e:,.2f} tCO₂e/an")
+                c2.metric("Stockage brut dans le biochar", f"{stable_tc * 44 / 12:,.2f} tCO₂e/an")
                 c3.metric("Coût annuel", f"{plan['cout_annuel_dh'].sum():,.0f} DH/an")
+                capture_pct = net_tco2e / max_carbon * 100 if max_carbon > 0 else 0
+                st.caption(f"Retrait net obtenu : {capture_pct:.1f} % du maximum réalisable sous ce budget.")
                 st.dataframe(plan, use_container_width=True, hide_index=True)
                 st.download_button("Télécharger le plan CSV", plan.to_csv(index=False).encode("utf-8-sig"), "plan_approvisionnement.csv", "text/csv")
-                st.caption("Estimation du carbone stable stocké dans le biochar ; ce n’est pas un bilan net des émissions du cycle de vie.")
+                st.caption("Bilan ACV partiel : stockage stable moins les émissions de procédé et le transport renseignés. La fin de vie, le scénario de référence, les changements d’usage des sols et les coproduits restent à modéliser.")
     else:
-        st.write("Choisis un site et des gisements pour atteindre une production cible tout en maximisant le carbone stable, sous budget.")
+        st.write("Choisis un site et des gisements pour équilibrer coût et carbone capturé, sous un budget annuel.")
         site_upload = st.file_uploader("Sites candidats (CSV)", type=["csv"], key="site_candidates_upload")
         if site_upload is None:
             sites = pd.read_csv("data/demo_sites.csv")
@@ -437,30 +549,42 @@ with optimize_tab:
                 target = c1.number_input("Production visée (t biochar/an)", min_value=1.0, value=100.0, step=10.0)
                 rate = c2.number_input("Transport (DH/t/km)", min_value=0.0, value=0.8, step=0.1)
                 road_factor = c3.number_input("Facteur de détour routier", min_value=1.0, value=1.3, step=0.1)
-                objective = c4.selectbox("Objectif", objective_options, key="location_objective")
-                budget = st.number_input("Budget maximal annuel (DH/an)", min_value=0.0, value=2_000_000.0, step=100_000.0, key="location_budget") if objective == objective_options[0] else None
+                budget = c4.number_input("Budget annuel max. (DH)", min_value=0.0, value=2_000_000.0, step=100_000.0, key="location_budget")
+                capture_target = st.slider("Part du retrait net maximal à conserver (%)", 50, 100, 90, 5, key="location_capture_target")
                 selected_biomass = st.multiselect("Biomasses admissibles", biomass_names, default=biomass_names, key="location_biomasses")
-                st.caption("Le modèle utilise la matière sèche, le rendement en biochar, le carbone du biochar et la fraction supposée stable. Le coût inclut le site et l’approvisionnement/transport estimé.")
+                lca_emissions = edit_lca_factors(selected_biomass, "location_lca_factors")
+                transport_emissions = st.number_input(
+                    "Émissions du transport (kg CO₂e/t/km)", min_value=0.0, value=0.0, step=0.01,
+                    key="location_transport_emissions",
+                    help="À renseigner selon le véhicule et le facteur d’émission retenus dans l’ACV."
+                )
+                if any(value == 0 for value in lca_emissions.values()) or transport_emissions == 0:
+                    st.warning("Facteurs d’émissions à 0 : ils sont considérés comme inconnus. Le retrait net affiché est alors surestimé.")
+                st.caption("Le modèle maximise le retrait net (carbone stable moins émissions ACV renseignées) sous budget, puis minimise le coût en conservant la part de retrait choisie.")
+                st.caption("Le calcul ACV actuel couvre les émissions hors transport saisies par biomasse et le transport routier. Les autres postes et le scénario de référence restent à ajouter.")
                 with st.expander("Voir les sites candidats"):
                     st.dataframe(sites, use_container_width=True, hide_index=True)
                 if st.button("Lancer l’optimisation", type="primary"):
                     solution, max_output, issue = solve_location(data, sites, char_params, target, rate, road_factor, selected_biomass,
-                        "Minimiser le coût" if objective == objective_options[1] else "Maximiser le carbone", budget,
+                        budget, capture_target, lca_emissions, transport_emissions,
                         other_change=other_change, transport_change=transport_change)
                     if solution is None:
                         st.error(f"Aucune solution réalisable. {issue} Production maximale indicative : {max_output:,.1f} t/an.")
                     else:
                         plan, site = solution["plan"], solution["site"]
                         stable_tc = plan["carbone_stable_estime_tC_an"].sum()
+                        net_tco2e = plan["carbone_net_lca_estime_tCO2e_an"].sum()
                         r1, r2, r3, r4 = st.columns(4)
                         r1.metric("Site choisi", str(site["nom_site"]))
                         r2.metric("Biochar estimé", f"{max_output:,.1f} t/an")
-                        r3.metric("Carbone stable estimé", f"{stable_tc:,.2f} tC/an")
-                        r4.metric("Stockage brut estimé", f"{stable_tc*44/12:,.2f} tCO₂e/an")
+                        r3.metric("Retrait net ACV estimé", f"{net_tco2e:,.2f} tCO₂e/an")
+                        r4.metric("Stockage brut", f"{stable_tc*44/12:,.2f} tCO₂e/an")
                         st.metric("Coût annuel modélisé", f"{solution['cout_total']:,.0f} DH/an")
+                        capture_pct = net_tco2e / solution["capture_max_tCO2e_net"] * 100 if solution["capture_max_tCO2e_net"] > 0 else 0
+                        st.caption(f"Retrait net obtenu : {capture_pct:.1f} % du maximum réalisable sous ce budget.")
                         st.dataframe(plan, use_container_width=True, hide_index=True)
                         st.download_button("Télécharger le plan optimisé", plan.to_csv(index=False).encode("utf-8-sig"), "plan_optimisation_site.csv", "text/csv")
-                        st.caption("Stockage brut estimé dans le biochar, pas un retrait net : les émissions de séchage, pyrolyse, transport et les usages concurrents ne sont pas soustraits.")
+                        st.caption("Bilan ACV partiel : retrait net calculé sur les facteurs renseignés, sans fin de vie, scénario de référence, changements d’usage des sols ni coproduits.")
 
 with data_tab:
     st.subheader("Données et qualité")

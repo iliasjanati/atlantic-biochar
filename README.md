@@ -28,11 +28,11 @@ Les hypothèses de scénario sont regroupées dans la barre latérale. Elles rè
 
 ### Approvisionnement régional
 
-Le modèle choisit les gisements pour une quantité annuelle de biomasse fixée. Par défaut, il **maximise le carbone stable estimé dans le biochar** sous un budget annuel. Le mode « minimiser le coût » reste disponible pour comparer. La demande est fixée exactement afin que le modèle ne sélectionne pas tout le volume mobilisable par défaut.
+Le modèle choisit les gisements pour une quantité annuelle de biomasse fixée et un budget maximal. Il effectue deux calculs : il détermine d’abord la capture stable maximale réalisable sous budget, puis minimise le coût tout en conservant la part de cette capture choisie par l’utilisateur (curseur de 50 à 100 %). La quantité de biomasse est fixée exactement afin que le modèle ne sélectionne pas tout le volume mobilisable par défaut.
 
 ### Choix du site
 
-Le modèle linéaire en nombres entiers mixtes choisit un seul site candidat et les flux de biomasse. Il respecte la disponibilité des gisements, la capacité de traitement et une cible minimale de production de biochar. L’objectif par défaut maximise le carbone stable estimé sous un budget qui comprend le coût fixe annualisé du site, les coûts variables d’approvisionnement et le transport estimé. Le mode « minimiser le coût » permet une comparaison.
+Le modèle linéaire en nombres entiers mixtes choisit un seul site candidat et les flux de biomasse. Il respecte la disponibilité des gisements, la capacité de traitement, une cible minimale de production de biochar et un budget annuel maximal comprenant le coût fixe du site, l’approvisionnement et le transport estimé. Il calcule d’abord le carbone stable maximal réalisable, puis minimise le coût en maintenant la part de capture choisie par l’utilisateur (50 à 100 %).
 
 Pour un gisement `g`, avec `x_g` tonnes de biomasse entrante/an, humidité `H_g`, rendement de biochar sur matière sèche `Y_g`, carbone du biochar `C_g` et fraction stable `P_g`, le stockage brut estimé est :
 
