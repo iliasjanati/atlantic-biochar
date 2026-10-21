@@ -1,0 +1,5 @@
+biomasse;filiere;produit;indicateur;coefficient;taux_recuperation;unite_coefficient;source;fiabilite;limite
+Résidus de tomate;Maraîchage;Tomate;superficie_ha;20.2;0.80;t résidu/ha;https://doi.org/10.1109/EEEIC/ICPSEurope57605.2023.10194876;Faible;Coefficient national publié mais base humide ou sèche à confirmer localement
+Résidus d'élagage des agrumes;Agrumes;*;superficie_ha;6.8;0.80;t résidu/ha;https://doi.org/10.1109/EEEIC/ICPSEurope57605.2023.10194876;Faible;Estimation agrégée de résidus et taux disponible publiés; usages concurrents non déduits
+Sarments de vigne;Vignes;*;superficie_ha;1.45;1.00;t matière sèche/ha/an;https://www.mdpi.com/2071-1050/10/11/4218;Faible;Référence méditerranéenne hors Maroc; coefficient présenté comme biomasse disponible, pratiques marocaines à valider
+Balles de riz;Céréales;Riz;production_t;0.267;1.00;t balle/t riz paddy;https://www.fao.org/4/AD538E/ad538e00.pdf;Moyenne-faible;Ratio FAO de transformation; quantité calculée avant déduction des usages des rizeries

@@ -68,6 +68,38 @@ Dans **Optimiser → Choix du site d’implantation**, importer un CSV avec les 
 
 Le logiciel permet de télécharger un modèle CSV vide.
 
+## Collecter des données agricoles ouvertes
+
+Un premier collecteur récupère le jeu **Production végétale 2010-2022** du portail officiel [data.gov.ma](https://data.gov.ma/data/dataset/api_dataset/production-vegetale-2010-2022). Il passe par l’API du catalogue pour retrouver la ressource Excel, télécharge le fichier original dans `data/raw/`, produit un CSV nettoyé avec une ligne par campagne et produit, et enregistre un fichier `.metadata.json` avec la source, la licence et la date de collecte.
+
+Depuis un terminal ouvert à la racine du projet :
+
+```bash
+python scripts/collecte_open_data_maroc.py
+```
+
+Le jeu couvre la production et les superficies agricoles par produit pour 2010-2022. Il ne contient pas directement les tonnages de palmes, noyaux, coques ou autres résidus. Le CSV nettoyé sert de base de calcul; il n’est pas directement importable comme gisement dans l’application, car la conversion en résidus doit encore être faite. Pour cela, il faut relier chaque culture à un coefficient de résidus documenté, puis appliquer des hypothèses de collecte et de disponibilité. Les résultats calculés doivent être signalés comme estimations et garder la référence de leurs coefficients. La licence publiée pour le jeu est ODbL : vérifier ses conditions avant de redistribuer une base dérivée.
+
+## Coefficients de gisement : sources et limites
+
+Le fichier [`data/references_coefficients_gisements.csv`](data/references_coefficients_gisements.csv) recense les coefficients trouvés, leur unité, leur source et leurs limites. Les coefficients sont des références de recherche, pas des mesures de l’entreprise. Certains ne s’appliquent pas directement aux champs du fichier Open Data : par exemple, les coques d’amande dépendent de la forme sous laquelle la production est comptabilisée; les balles de riz sont un coproduit d’une rizerie; la pulpe de betterave dépend du tonnage traité en sucrerie; et l’arganier n’apparaît pas dans le jeu agricole téléchargé.
+
+Le jeu officiel est national : il ne donne pas de région ou de province pour chaque production. Il permet donc de commencer une estimation nationale par campagne, mais pas de localiser les gisements pour calculer les distances ou attribuer les quantités aux régions. Les coefficients qui proviennent d’études méditerranéennes ou de variétés hors Maroc sont signalés comme des références à valider.
+
+Les résidus de palmier dattier disposent d’une mesure marocaine par arbre et par an, mais le jeu agricole ne donne pas le nombre de palmiers. Il faut récupérer l’effectif régional/national des pieds avant d’en tirer un tonnage. De même, la pulpe de betterave doit être estimée à partir des données des sucreries, pas seulement de la production agricole.
+
+## Générer un premier CSV de gisements estimés
+
+Après avoir collecté et normalisé le fichier agricole, lancer :
+
+```bash
+python scripts/estimer_gisements.py
+```
+
+Le script applique les coefficients de `data/coefficients_estimations.csv` aux surfaces ou aux productions agricoles par campagne et crée `data/gisements_estimes_web.csv`. Ce fichier respecte les colonnes d’import des gisements de l’application et garde, en colonnes supplémentaires, la campagne, le coefficient, la source et les limites. Il couvre pour l’instant les résidus de tomate, l’élagage des agrumes, les sarments de vigne et les balles de riz.
+
+Les volumes calculés sont des estimations bibliographiques nationales. Le volume dit mobilisable est un proxy qui ne déduit pas encore les usages concurrents, la matière à laisser au sol ni les contraintes logistiques. Les cinq coûts sont vides : l’application pourra afficher les gisements, mais l’optimisation économique ne pourra pas utiliser ces lignes avant que les coûts soient renseignés. Les estimations ne sont pas ventilées par région et ne permettent pas encore une optimisation géographique fiable.
+
 ## Principes
 
 - Les valeurs manquantes restent manquantes ; elles ne sont pas remplacées par zéro.

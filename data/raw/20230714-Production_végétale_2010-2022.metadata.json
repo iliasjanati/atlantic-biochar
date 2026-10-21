@@ -1,0 +1,14 @@
+{
+  "titre": "Production végétale 2010-2022",
+  "producteur": "Département de l'Agriculture",
+  "licence": "Open Data Commons Open Database License (ODbL)",
+  "page_source": "https://data.gov.ma/data/dataset/api_dataset/production-vegetale-2010-2022",
+  "api_source": "https://data.gov.ma/data/api/3/action/package_search",
+  "ressource_nom": "20230714-Production végétale 2010-2022.xlsx",
+  "ressource_url": "https://data.gov.ma/data/fr/dataset/fb340a2e-7a78-4880-a7ff-d3eab72a4a60/resource/8c15d785-b1e6-4f11-acf9-958d34877529/download/20230714-production-vegetale-2010-2022.xlsx",
+  "fichier_local": "20230714-Production_végétale_2010-2022.xlsx",
+  "fichier_normalise": "production_vegetale_maroc_normalisee.csv",
+  "nombre_lignes_normalisees": 1314,
+  "date_collecte_utc": "2026-10-21T09:27:44.130959+00:00",
+  "limite": "Production et superficies agricoles; les tonnages de résidus doivent être estimés séparément."
+}
